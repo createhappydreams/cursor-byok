@@ -147,14 +147,43 @@ fn decode_text(value: &Value) -> Result<MessageContent> {
                 text: required_string(part, "text")?.into(),
             }),
             Some("image") => {
-                let mime_type = required_string(part, "mimeType")?;
-                let encoded = required_string(part, "image")?;
-                Ok(ContentPart::Image {
-                    mime_type: mime_type.into(),
-                    data: STANDARD.decode(encoded).map_err(|error| {
-                        Error::Protocol(format!("invalid Cursor image base64: {error}"))
-                    })?,
-                })
+                // Local patch: replayed history delivers images in three shapes:
+                // raw base64, a Uint8Array wrapper carrying hex, or a payload-less
+                // stub (Cursor's own backend keeps the bytes). Only the last case
+                // is unrecoverable, and it used to abort the entire run, which
+                // surfaced as an endless reconnect loop in the IDE.
+                let declared = part
+                    .get("mimeType")
+                    .and_then(Value::as_str)
+                    .filter(|mime| mime.starts_with("image/"));
+                let decoded = match part.get("image") {
+                    Some(Value::String(encoded)) if !encoded.is_empty() => {
+                        STANDARD.decode(encoded).ok()
+                    }
+                    Some(Value::Object(wrapper)) => wrapper
+                        .get("hex")
+                        .and_then(Value::as_str)
+                        .and_then(|hex_value| hex::decode(hex_value).ok()),
+                    _ => None,
+                };
+                match decoded.filter(|data| !data.is_empty()) {
+                    Some(data) => Ok(ContentPart::Image {
+                        mime_type: declared
+                            .map(str::to_string)
+                            .unwrap_or_else(|| sniff_image_mime(&data).to_string()),
+                        data,
+                    }),
+                    None => {
+                        tracing::warn!(
+                            mime_type = declared.unwrap_or("<none>"),
+                            "Cursor image part carries no decodable payload; substituting text placeholder"
+                        );
+                        Ok(ContentPart::Text {
+                            text: "[image unavailable: this attachment is no longer stored locally]"
+                                .into(),
+                        })
+                    }
+                }
             }
             Some(kind) => Err(Error::Protocol(format!(
                 "unsupported Cursor message content part: {kind}"
@@ -249,6 +278,21 @@ fn decode_tool_result(value: &Value) -> Result<ToolResultContent> {
         image: None,
         provider_parts: Vec::new(),
     })
+}
+
+/// Best-effort image type detection for payloads that omit `mimeType`.
+fn sniff_image_mime(data: &[u8]) -> &'static str {
+    if data.starts_with(&[0xFF, 0xD8]) {
+        "image/jpeg"
+    } else if data.starts_with(&[0x89, b'P', b'N', b'G']) {
+        "image/png"
+    } else if data.starts_with(b"GIF8") {
+        "image/gif"
+    } else if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+        "image/webp"
+    } else {
+        "image/png"
+    }
 }
 
 fn required_string<'a>(value: &'a Value, name: &str) -> Result<&'a str> {

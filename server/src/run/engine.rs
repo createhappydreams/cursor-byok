@@ -973,7 +973,6 @@ async fn hydrate_tool_images(
     use crate::{
         model::{ContentPart, ProjectedContent},
         store::BlobId,
-        Error,
     };
 
     for message in messages {
@@ -984,9 +983,16 @@ async fn hydrate_tool_images(
             continue;
         };
         let id = BlobId::from_base64(&image.blob_id)?;
-        let data = store.get_blob(&id).await?.ok_or_else(|| {
-            Error::Protocol(format!("Read image Blob is missing: {}", image.blob_id))
-        })?;
+        // Local patch: keep the tool result usable when the referenced blob is
+        // gone (expired cache, restored conversation, older Cursor build).
+        // The text output still reaches the model; only the image is dropped.
+        let Some(data) = store.get_blob(&id).await? else {
+            tracing::warn!(
+                blob_id = %image.blob_id,
+                "read image blob is missing; keeping text-only tool result"
+            );
+            continue;
+        };
         result.provider_parts = vec![
             ContentPart::Text {
                 text: result.content.clone(),

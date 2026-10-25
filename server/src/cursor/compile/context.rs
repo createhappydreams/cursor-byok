@@ -129,12 +129,20 @@ async fn decode_part<T: Message + Default>(
         return Ok(None);
     }
     let id = BlobId::from_bytes(raw_id)?;
-    let data = context_sync.get(&id).await?.ok_or_else(|| {
-        Error::Protocol(format!(
-            "{name} context Blob is missing: {}",
-            id.to_base64()
-        ))
-    })?;
+    // Local patch: every caller treats a missing part as "skip this section",
+    // so degrade instead of failing the whole run when the client no longer
+    // holds the referenced blob.
+    let data = match context_sync.get(&id).await? {
+        Some(data) => data,
+        None => {
+            tracing::warn!(
+                part = %name,
+                blob_id = %id.to_base64(),
+                "context blob is missing; skipping this part"
+            );
+            return Ok(None);
+        }
+    };
     if data.len() != expected_length as usize {
         return Err(Error::Protocol(format!(
             "{name} context Blob length mismatch: expected {expected_length}, got {}",

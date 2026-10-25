@@ -14,10 +14,28 @@ pub async fn parts(
     let mut parts = vec![ContentPart::Text { text }];
     if let Some(context) = &message.selected_context {
         for image in &context.selected_images {
-            parts.push(ContentPart::Image {
-                mime_type: image_mime_type(image)?,
-                data: image_data(image, blobs).await?,
-            });
+            // Local patch: a single unresolvable attachment must not fail the whole
+            // run. Historical images kept by the Cursor client are frequently
+            // unavailable after cache cleanup, which previously aborted the
+            // request and left the IDE retrying forever. Degrade to a text
+            // placeholder instead and keep the conversation usable.
+            let resolved = match image_mime_type(image) {
+                Ok(mime_type) => image_data(image, blobs).await.map(|data| (mime_type, data)),
+                Err(error) => Err(error),
+            };
+            match resolved {
+                Ok((mime_type, data)) => parts.push(ContentPart::Image { mime_type, data }),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        "selected image could not be resolved; continuing with a text placeholder"
+                    );
+                    parts.push(ContentPart::Text {
+                        text: "[image unavailable: attachment data could not be fetched from the Cursor client]"
+                            .into(),
+                    });
+                }
+            }
         }
     }
     Ok(parts)
