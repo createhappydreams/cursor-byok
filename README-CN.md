@@ -49,7 +49,7 @@ cursor-byok 是一个开源的本地模型网关。它在你的设备上运行�
 
 ## 快速开始
 
-1. 从 [GitHub Releases](https://github.com/leookun/cursor-byok/releases/latest) 下载适合你操作系统的最新版本。
+1. 从 [GitHub Releases](https://github.com/createhappydreams/cursor-byok/releases/latest) 下载适合你操作系统的最新版本。
 2. 启动 cursor-byok，打开 **Cursor 配置**，按提示初始化本地 CA（证书颁发机构）。
 3. 在模型设置中添加模型，填写服务地址、API Key 和模型名称，然后保存并运行 **测试**。
 4. 确认测试通过后，保持 cursor-byok 运行。
@@ -227,6 +227,8 @@ make build-docker    # 构建 Docker 镜像
 ## 参与贡献
 
 欢迎提交 Issue 和 Pull Request。提交代码前请先阅读项目中的开发说明，并运行 `make check` 确认格式、测试和前端构建检查通过。
+
+构建步骤、目录结构，以及两个很容易踩的坑（`cargo build` 与 `tauri build` 的区别），见 [BUILDING.md](./BUILDING.md)。
 
 ## 许可证
 

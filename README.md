@@ -52,7 +52,7 @@ You can connect OpenAI- and Anthropic-compatible services, customize endpoints, 
 
 ## Quick Start
 
-1. Download the latest build for your platform from [GitHub Releases](https://github.com/leookun/cursor-byok/releases/latest).
+1. Download the latest build for your platform from [GitHub Releases](https://github.com/createhappydreams/cursor-byok/releases/latest).
 2. Launch cursor-byok, open **Model Settings**, and enter the endpoint, API key, and model ID.
 3. Test the model configuration. Once it passes, return to the dashboard and start the service.
 4. Test the model configuration. Once it passes, return to the dashboard and start the service.
@@ -105,7 +105,7 @@ See the [release roadmap](https://github.com/leookun/cursor-byok/discussions/32)
 
 ## Development and Contributing
 
-Issues and pull requests are welcome. See the [Contributing Guide](./CONTRIBUTING_EN.md) for prerequisites, build commands, project structure, and contribution guidelines.
+Issues and pull requests are welcome. See [BUILDING.md](./BUILDING.md) for prerequisites, build commands, project structure — and the two build pitfalls (`cargo build` vs `tauri build`) that are easy to hit.
 
 ## Contributors
 
