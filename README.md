@@ -1,3 +1,11 @@
+> **Maintenance fork** — upstream [`leookun/cursor-byok`](https://github.com/leookun/cursor-byok) was archived on 2026-10-20. This fork carries a fix for a bug that makes **any conversation started on Cursor's official backend** unusable through cursor-byok:
+>
+> - **Symptom**: the chat shows `Reconnecting…` indefinitely, then `the server failed 4 times`. Newly created conversations work fine.
+> - **Cause**: replayed history delivers images as `{"__type":"Uint8Array","hex":"…"}`, while `decode_text()` only accepted base64 (`required_string(part, "image")?`). The attachment was reported as missing; because the error is `Error::Protocol`, the entire run aborted **before reaching your provider** — which is why switching models never helped.
+> - **Fix**: accept both encodings (images are fully decoded, not dropped) and fall back to a text placeholder when no payload exists.
+>
+> Commit [`0c12b38`](https://github.com/createhappydreams/cursor-byok/commit/0c12b38f549f3862a9b3840bc23b8ac101a3be4a) · [中文说明](./README-CN.md)
+
 ## 👋Is Cursor getting too heavy?  ✨ **New from the same author** → [BaoCode](https://github.com/baocode-dev/baocode) — an awesome desktop GUI for Claude Code: polished, ultra-small, ultra-light.
 
 <div align="center">

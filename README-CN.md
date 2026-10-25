@@ -1,3 +1,11 @@
+> **维护分支说明** — 上游 [`leookun/cursor-byok`](https://github.com/leookun/cursor-byok) 已于 2026-10-20 归档。本分支修复了一个会让**在 Cursor 官方后端创建的旧对话**无法继续使用的问题：
+>
+> - **现象**：对话一直显示 `Reconnecting…`，最后提示 `the server failed 4 times`；新建对话则完全正常。
+> - **原因**：回放历史消息时，图片载荷是 `{"__type":"Uint8Array","hex":"…"}`，而 `decode_text()` 只接受 base64（`required_string(part, "image")?`）。于是图片被判为缺失；由于抛的是 `Error::Protocol`，整轮请求在**发往模型服务商之前**就中断了——这也是换模型、换供应商都没用的原因。
+> - **修复**：两种编码都支持（图片完整解码、不会丢失）；确实没有数据时才降级为文字占位，不再中断整轮对话。
+>
+> 提交 [`0c12b38`](https://github.com/createhappydreams/cursor-byok/commit/0c12b38f549f3862a9b3840bc23b8ac101a3be4a) · [English](./README.md)
+
 ## 👋 受够了Cursor的性能？ ✨ **同作者新作** → [Baocode](https://github.com/baocode-dev/baocode) —— 为 Claude Code 打造的精致的桌面 GUI，超小尺寸，超低占用
 
 <div align="center">
