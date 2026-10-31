@@ -213,11 +213,16 @@ fn decode_assistant(value: &Value, internal_id: &str) -> Result<MessageContent> 
             }
             Some("reasoning") => {
                 thinking.push_str(part.get("text").and_then(Value::as_str).unwrap_or_default());
+                // Local patch: one Cursor assistant turn carries a reasoning block per
+                // tool round, but a provider message replays at most one reasoning
+                // state. Keeping the most recent signature — the one leading into the
+                // final answer or tool call — lets imported histories run instead of
+                // aborting the whole turn.
                 if let Some(signature) = part.get("signature").and_then(Value::as_str) {
                     if replay_state.is_some() {
-                        return Err(Error::Protocol(
-                            "Cursor assistant has multiple reasoning signatures".into(),
-                        ));
+                        tracing::debug!(
+                            "Cursor assistant carries multiple reasoning signatures; keeping the most recent"
+                        );
                     }
                     replay_state = Some(decode_replay_state(signature)?);
                 }

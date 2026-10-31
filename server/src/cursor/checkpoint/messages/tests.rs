@@ -91,6 +91,36 @@ fn pending_tool_round_is_one_complete_assistant_message_and_round_trips() {
 }
 
 #[test]
+fn assistant_keeps_most_recent_reasoning_signature() {
+    let wire = json!({
+        "role": "assistant",
+        "content": [
+            {"type": "reasoning", "text": "first", "signature": "sig-one"},
+            {"type": "tool-call", "toolCallId": "a", "toolName": "Read", "args": {"path": "/a"}},
+            {"type": "reasoning", "text": "second", "signature": "sig-two"},
+            {"type": "text", "text": "done"}
+        ]
+    });
+    let decoded = decode(wire.to_string().as_bytes(), "assistant".into()).unwrap();
+    let MessageContent::Assistant {
+        text,
+        thinking,
+        replay_state,
+        tool_calls,
+        ..
+    } = decoded.content
+    else {
+        panic!("expected an assistant message");
+    };
+    assert_eq!(text, "done");
+    assert_eq!(thinking, "firstsecond");
+    assert_eq!(tool_calls.len(), 1);
+    let replay_state = replay_state.expect("the most recent signature is kept");
+    assert_eq!(replay_state.provider_kind, "cursor_opaque");
+    assert_eq!(replay_state.value, json!("sig-two"));
+}
+
+#[test]
 fn cursor_wire_ids_are_projection_metadata_not_internal_message_ids() {
     let assistant = ProjectedMessage {
         message_id: "internal-assistant-id".into(),
