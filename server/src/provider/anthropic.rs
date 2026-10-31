@@ -54,21 +54,15 @@ impl Provider for AnthropicProvider {
             let ModelInvocation { call_id, request, .. } = invocation;
             let mut messages = anthropic_messages(&request.history)?;
             mark_cache_breakpoint(&mut messages);
-            let system = if request.prompt.instructions.is_empty() {
-                Value::String(String::new())
-            } else {
-                json!([{
-                    "type": "text",
-                    "text": request.prompt.instructions,
-                    "cache_control": {"type": "ephemeral"}
-                }])
-            };
             let max_tokens = request.model.max_output_tokens.or(config.max_output_tokens)
                 .unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS);
             let mut body = json!({
-                "model": request.model.model_id, "system": system, "messages": messages,
+                "model": request.model.model_id, "messages": messages,
                 "max_tokens": max_tokens, "stream": true
             });
+            if let Some(system) = anthropic_system(&request.prompt.instructions) {
+                body["system"] = system;
+            }
             if !request.prompt.tools.is_empty() {
                 let tool_count = request.prompt.tools.len();
                 body["tools"] = json!(request.prompt.tools.iter().enumerate().map(|(index, tool)| {
@@ -372,6 +366,19 @@ fn anthropic_tool_id(id: &str) -> String {
     format!("{sanitized}_{hash:08x}")
 }
 
+/// Anthropic rejects empty text content blocks, so a request without instructions
+/// must drop the `system` field entirely instead of sending an empty string.
+fn anthropic_system(instructions: &str) -> Option<Value> {
+    if instructions.is_empty() {
+        return None;
+    }
+    Some(json!([{
+        "type": "text",
+        "text": instructions,
+        "cache_control": {"type": "ephemeral"}
+    }]))
+}
+
 fn anthropic_messages(messages: &[ProjectedMessage]) -> Result<Vec<Value>> {
     let mut output = Vec::new();
     for message in messages {
@@ -596,5 +603,15 @@ mod tests {
             "call_abc-123",
             "valid ids must survive untouched"
         );
+    }
+
+    #[test]
+    fn empty_instructions_omit_the_system_field() {
+        assert_eq!(anthropic_system(""), None);
+
+        let system = anthropic_system("be brief").expect("instructions produce a system block");
+        assert_eq!(system[0]["type"], "text");
+        assert_eq!(system[0]["text"], "be brief");
+        assert_eq!(system[0]["cache_control"]["type"], "ephemeral");
     }
 }
