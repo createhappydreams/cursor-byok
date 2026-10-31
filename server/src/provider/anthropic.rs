@@ -339,6 +339,39 @@ fn merge_usage_field(total: &mut Option<u64>, update: Option<u64>) {
     }
 }
 
+/// Anthropic rejects tool ids outside `[a-zA-Z0-9_-]`, while Cursor ids may carry
+/// other characters (`:`, `.`, and so on). Sanitising keeps the `tool_use` block
+/// and the `tool_result` that answers it pointing at the same id, because both
+/// sides go through this function.
+fn anthropic_tool_id(id: &str) -> String {
+    let valid = id
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-');
+    if valid && !id.is_empty() {
+        return id.to_string();
+    }
+    let mut sanitized: String = id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' || character == '-' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .take(48)
+        .collect();
+    if sanitized.is_empty() {
+        sanitized.push_str("call");
+    }
+    let hash = id
+        .bytes()
+        .fold(2_166_136_261u32, |hash, byte| {
+            (hash ^ u32::from(byte)).wrapping_mul(16_777_619)
+        });
+    format!("{sanitized}_{hash:08x}")
+}
+
 fn anthropic_messages(messages: &[ProjectedMessage]) -> Result<Vec<Value>> {
     let mut output = Vec::new();
     for message in messages {
@@ -360,7 +393,7 @@ fn anthropic_messages(messages: &[ProjectedMessage]) -> Result<Vec<Value>> {
                     "user",
                     vec![json!({
                         "type": "tool_result",
-                        "tool_use_id": result.call_id,
+                        "tool_use_id": anthropic_tool_id(&result.call_id),
                         "content": content,
                     })],
                 );
@@ -386,7 +419,7 @@ fn anthropic_messages(messages: &[ProjectedMessage]) -> Result<Vec<Value>> {
                 content.extend(calls.iter().map(|call| {
                     json!({
                         "type": "tool_use",
-                        "id": call.call_id,
+                        "id": anthropic_tool_id(&call.call_id),
                         "name": call.name,
                         "input": call.arguments,
                     })
@@ -543,5 +576,25 @@ mod tests {
         assert_eq!(usage.context_input_tokens, Some(100_766));
         assert_eq!(usage.output_tokens, Some(191));
         assert_eq!(usage.total_tokens, Some(100_957));
+    }
+
+    #[test]
+    fn tool_ids_outside_anthropic_charset_are_sanitised_deterministically() {
+        let cursor_id = "9faaaea6-b5772129:tool-round.1";
+        let sanitised = anthropic_tool_id(cursor_id);
+
+        assert!(
+            sanitised
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'),
+            "sanitised id still carries forbidden characters: {sanitised}"
+        );
+        assert_eq!(sanitised, anthropic_tool_id(cursor_id));
+        assert_ne!(sanitised, anthropic_tool_id("9faaaea6-b5772129:tool-round.2"));
+        assert_eq!(
+            anthropic_tool_id("call_abc-123"),
+            "call_abc-123",
+            "valid ids must survive untouched"
+        );
     }
 }
