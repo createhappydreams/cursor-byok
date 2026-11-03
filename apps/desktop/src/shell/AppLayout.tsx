@@ -28,7 +28,7 @@ type MenuItem =
   | { kind: "external"; id: string; label: string; icon: IconifyIcon | string }
   | { kind: "group"; label: string };
 
-const keptAlivePages = ["/", "/calls", "/settings", "/harness/cursor", "/plugins"];
+const keptAlivePages = ["/", "/calls", "/conversations", "/settings", "/harness/cursor", "/plugins"];
 const readAdStorageKey = "cursor-byok:read-ad-ids";
 const dismissedAdStorageKey = "cursor-byok:dismissed-ad-ids";
 const tutorialReadStorageKey = "cursor-byok:tutorial-read";
@@ -73,6 +73,7 @@ export function AppLayout() {
   const menuItems: MenuItem[] = [
     { kind: "page", path: "/", label: t("数据概览"), icon: flatColorAreaChartIcon },
     { kind: "page", path: "/calls", label: t("调用详细"), icon: flatColorSalesPerformanceIcon },
+    { kind: "page", path: "/conversations", label: t("会话数据"), icon: flatColorSalesPerformanceIcon },
     { kind: "group", label: t("模型配置") },
     { kind: "page", path: "/harness/cursor", label: "Cursor", icon: cursorIconUrl },
     { kind: "group", label: t("设置") },

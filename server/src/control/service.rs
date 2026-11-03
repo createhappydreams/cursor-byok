@@ -28,8 +28,9 @@ use crate::{
     plugin::{PluginDescriptor, PluginRegistry, PluginRuntime, PluginRuntimeStatus},
     provider::{is_valid_response_event, ModelEvent, Provider},
     store::{
-        CommitSettings, DesktopSettings, ExternalApiSettings, PortSettings, ProxySettings,
-        ProxySettingsInput, StatisticsStorage, Store, TabSettings, TokenPricingSettings,
+        CommitSettings, ConversationSummary, DesktopSettings, ExternalApiSettings, PortSettings,
+        ProxySettings, ProxySettingsInput, PurgedConversation, StatisticsStorage, Store, TabSettings,
+        TokenPricingSettings,
     },
     Error, Result,
 };
@@ -597,6 +598,17 @@ impl ControlService {
                 })
                 .collect(),
         })
+    }
+
+    pub async fn conversations(&self) -> Result<Vec<ConversationSummary>> {
+        self.store.conversations_overview().await
+    }
+
+    pub async fn purge_conversation(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Option<PurgedConversation>> {
+        self.store.purge_conversation(conversation_id).await
     }
 
     pub async fn calls(&self, limit: i64) -> Result<Vec<CallSummary>> {

@@ -475,6 +475,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export interface ConversationSummary {
+  conversation_id: string;
+  preview: string;
+  message_count: number;
+  checkpoint_count: number;
+  last_used_ms: number;
+}
+
+export interface PurgedConversation {
+  messages: number;
+  checkpoints: number;
+  runs: number;
+  llm_calls: number;
+}
+
 export const api = {
   ads: (disabledAdIds: Iterable<string>, locale: Locale) => {
     const value = [...disabledAdIds].join(",");
@@ -535,6 +550,8 @@ export const api = {
   },
   setCursorEnabled: (enabled: boolean) => request<CursorHarnessStatus>("/harness/cursor/enabled", { method: "PUT", body: JSON.stringify({ enabled }) }),
   calls: () => request<LlmCall[]>("/llm-calls?limit=200"),
+  conversations: () => request<ConversationSummary[]>("/conversations"),
+  deleteConversation: (id: string) => request<PurgedConversation>(`/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
   call: (id: string) => request<CallDetail>(`/llm-calls/${encodeURIComponent(id)}`),
   openCallDetails: async (id: string) => {
     const url = new URL(window.location.href);

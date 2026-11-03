@@ -933,6 +933,18 @@
         }
       ]
     },
+    "21d45970aa8a0d5b": {
+      "source": "暂无会话数据",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 82,
+          "column": 63
+        }
+      ]
+    },
     "22c6b4eb4caee6ae": {
       "source": "代理设置已保存",
       "kind": "text",
@@ -1054,7 +1066,7 @@
       "refs": [
         {
           "file": "shell/AppLayout.tsx",
-          "line": 248,
+          "line": 249,
           "column": 14
         }
       ]
@@ -1068,6 +1080,18 @@
           "file": "features/home/metrics/HomeMetrics.tsx",
           "line": 89,
           "column": 5
+        }
+      ]
+    },
+    "2b80d4e7163dce0a": {
+      "source": "最后使用",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 56,
+          "column": 42
         }
       ]
     },
@@ -1177,12 +1201,12 @@
         },
         {
           "file": "shell/AppLayout.tsx",
-          "line": 238,
+          "line": 239,
           "column": 20
         },
         {
           "file": "shell/AppLayout.tsx",
-          "line": 249,
+          "line": 250,
           "column": 20
         }
       ]
@@ -1299,7 +1323,7 @@
       "refs": [
         {
           "file": "shell/AppLayout.tsx",
-          "line": 237,
+          "line": 238,
           "column": 14
         }
       ]
@@ -1309,6 +1333,11 @@
       "kind": "text",
       "placeholders": [],
       "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 77,
+          "column": 64
+        },
         {
           "file": "features/models/CursorModelCards.tsx",
           "line": 173,
@@ -1430,7 +1459,7 @@
         },
         {
           "file": "shell/AppLayout.tsx",
-          "line": 250,
+          "line": 251,
           "column": 21
         }
       ]
@@ -1582,6 +1611,18 @@
           "file": "features/settings/SettingsPage.tsx",
           "line": 241,
           "column": 39
+        }
+      ]
+    },
+    "3b5110664aa4cadb": {
+      "source": "条消息",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 35,
+          "column": 38
         }
       ]
     },
@@ -2056,7 +2097,7 @@
         },
         {
           "file": "shell/AppLayout.tsx",
-          "line": 204,
+          "line": 205,
           "column": 67
         }
       ]
@@ -2075,6 +2116,18 @@
           "file": "features/plugins/PluginResourcePanels.tsx",
           "line": 490,
           "column": 42
+        }
+      ]
+    },
+    "4da199fae933d4fa": {
+      "source": "消息",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 54,
+          "column": 41
         }
       ]
     },
@@ -2172,7 +2225,7 @@
         },
         {
           "file": "shell/AppLayout.tsx",
-          "line": 224,
+          "line": 225,
           "column": 51
         }
       ]
@@ -2494,7 +2547,7 @@
       "refs": [
         {
           "file": "shell/AppLayout.tsx",
-          "line": 254,
+          "line": 255,
           "column": 11
         }
       ]
@@ -2678,7 +2731,7 @@
       "refs": [
         {
           "file": "shared/api.ts",
-          "line": 532,
+          "line": 547,
           "column": 43
         }
       ]
@@ -2829,8 +2882,20 @@
       "refs": [
         {
           "file": "shell/AppLayout.tsx",
-          "line": 80,
+          "line": 81,
           "column": 47
+        }
+      ]
+    },
+    "699ea2523018c8ac": {
+      "source": "快照",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 55,
+          "column": 41
         }
       ]
     },
@@ -2882,6 +2947,18 @@
           "file": "shell/WindowControls.tsx",
           "line": 45,
           "column": 14
+        }
+      ]
+    },
+    "6bf6d3f3d6261b75": {
+      "source": "对话",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 53,
+          "column": 18
         }
       ]
     },
@@ -3017,7 +3094,7 @@
       "refs": [
         {
           "file": "shared/api.ts",
-          "line": 527,
+          "line": 542,
           "column": 43
         }
       ]
@@ -3096,7 +3173,7 @@
       "refs": [
         {
           "file": "App.tsx",
-          "line": 62,
+          "line": 64,
           "column": 21
         }
       ]
@@ -3173,6 +3250,18 @@
           "file": "features/plugins/PluginResourcePanels.tsx",
           "line": 395,
           "column": 13
+        }
+      ]
+    },
+    "8047e8b049ef0821": {
+      "source": "已删除该会话的本地数据",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 34,
+          "column": 9
         }
       ]
     },
@@ -3387,6 +3476,18 @@
         }
       ]
     },
+    "8989b881f3eb35e4": {
+      "source": "删除中",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 77,
+          "column": 53
+        }
+      ]
+    },
     "89a101b809be7cfc": {
       "source": "系统会原样使用此地址，不追加或修改请求路径。",
       "kind": "text",
@@ -3440,7 +3541,7 @@
       "refs": [
         {
           "file": "shell/AppLayout.tsx",
-          "line": 76,
+          "line": 77,
           "column": 29
         }
       ]
@@ -3481,7 +3582,7 @@
       "refs": [
         {
           "file": "shell/AppLayout.tsx",
-          "line": 256,
+          "line": 257,
           "column": 16
         }
       ]
@@ -3584,6 +3685,18 @@
         }
       ]
     },
+    "9239be84380e223c": {
+      "source": "删除后本地不再保留这段对话的数据，Cursor 侧再次打开会重新导入。确定删除？",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 27,
+          "column": 25
+        }
+      ]
+    },
     "92e26b27d5ea8f0e": {
       "source": "检查更新失败：{error}",
       "kind": "template",
@@ -3610,7 +3723,7 @@
         },
         {
           "file": "shell/AppLayout.tsx",
-          "line": 224,
+          "line": 225,
           "column": 62
         }
       ]
@@ -3766,7 +3879,7 @@
       "refs": [
         {
           "file": "shell/AppLayout.tsx",
-          "line": 243,
+          "line": 244,
           "column": 11
         }
       ]
@@ -3953,6 +4066,18 @@
           "file": "features/settings/SettingsPage.tsx",
           "line": 63,
           "column": 34
+        }
+      ]
+    },
+    "a06c711ec1c6fcdb": {
+      "source": "按最后使用时间排序",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 49,
+          "column": 40
         }
       ]
     },
@@ -4151,7 +4276,7 @@
       "refs": [
         {
           "file": "shell/AppLayout.tsx",
-          "line": 239,
+          "line": 240,
           "column": 21
         }
       ]
@@ -4401,12 +4526,12 @@
         },
         {
           "file": "shell/AppLayout.tsx",
-          "line": 270,
+          "line": 271,
           "column": 64
         },
         {
           "file": "shell/AppLayout.tsx",
-          "line": 270,
+          "line": 271,
           "column": 125
         }
       ]
@@ -4797,7 +4922,7 @@
       "refs": [
         {
           "file": "shell/AppLayout.tsx",
-          "line": 261,
+          "line": 262,
           "column": 24
         }
       ]
@@ -4897,6 +5022,18 @@
           "file": "features/calls/CallDetails.tsx",
           "line": 58,
           "column": 51
+        }
+      ]
+    },
+    "c4f7fad0fd30f355": {
+      "source": "个快照",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 35,
+          "column": 74
         }
       ]
     },
@@ -5333,7 +5470,7 @@
       "refs": [
         {
           "file": "shell/AppLayout.tsx",
-          "line": 190,
+          "line": 191,
           "column": 54
         }
       ]
@@ -5497,7 +5634,7 @@
         },
         {
           "file": "shell/AppLayout.tsx",
-          "line": 78,
+          "line": 79,
           "column": 29
         }
       ]
@@ -6112,7 +6249,7 @@
         },
         {
           "file": "shell/AppLayout.tsx",
-          "line": 79,
+          "line": 80,
           "column": 46
         }
       ]
@@ -6214,6 +6351,23 @@
           "file": "features/settings/SettingsPage.tsx",
           "line": 189,
           "column": 21
+        }
+      ]
+    },
+    "fab7b6ce792d5c23": {
+      "source": "会话数据",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 90,
+          "column": 14
+        },
+        {
+          "file": "shell/AppLayout.tsx",
+          "line": 76,
+          "column": 52
         }
       ]
     },
@@ -6398,7 +6552,7 @@
       "refs": [
         {
           "file": "shell/AppLayout.tsx",
-          "line": 81,
+          "line": 82,
           "column": 48
         }
       ]

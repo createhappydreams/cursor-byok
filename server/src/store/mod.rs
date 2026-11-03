@@ -18,6 +18,7 @@ mod tool_rounds;
 mod writer;
 
 pub use cas::*;
+pub use conversations::{ConversationSummary, PurgedConversation};
 pub(crate) use cursor_traces::BufferedCursorTraceChunk;
 pub(crate) use llm_calls::{BufferedLlmChunk, ContextUsageAnchor};
 pub use runs::*;
