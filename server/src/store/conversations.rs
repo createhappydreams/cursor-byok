@@ -9,6 +9,9 @@ use crate::{
 
 use super::{now_ms, Store};
 
+/// A run whose row has not moved for this long is considered dead.
+const STALE_RUN_MS: i64 = 10 * 60 * 1000;
+
 /// One row of the conversation inventory shown by the control console.
 #[derive(Clone, Debug, Serialize)]
 pub struct ConversationSummary {
@@ -128,11 +131,17 @@ impl Store {
                       WHERE m.conversation_id = c.conversation_id),
                     (SELECT COUNT(*) FROM conversation_checkpoints k
                       WHERE k.conversation_id = c.conversation_id),
-                    COALESCE((SELECT json_extract(m.payload_json, '$.content.text')
+                    COALESCE((SELECT COALESCE(
+                                 json_extract(m.payload_json, '$.content.parts[0].text'),
+                                 json_extract(m.payload_json, '$.content.text'))
                               FROM messages m
                               WHERE m.conversation_id = c.conversation_id
                                 AND m.role = 'user'
-                                AND m.origin = 'user'
+                                AND m.origin IN ('user', 'prompt')
+                                AND COALESCE(
+                                      json_extract(m.payload_json, '$.content.parts[0].text'),
+                                      json_extract(m.payload_json, '$.content.text'), '')
+                                    LIKE '%<user_query>%'
                               ORDER BY m.created_at_ms
                               LIMIT 1), '')
              FROM conversations c
@@ -173,9 +182,22 @@ impl Store {
             return Ok(None);
         };
         if let Some(run_id) = active_run {
-            return Err(Error::Store(format!(
-                "conversation {conversation_id} is still running ({run_id})"
-            )));
+            // A run that stopped without committing (killed process, crash) keeps
+            // its status at `running` forever. Only a recently updated run is
+            // treated as live, otherwise the conversation could never be removed.
+            let live: Option<i64> = sqlx::query_scalar(
+                "SELECT 1 FROM runs
+                 WHERE run_id = ? AND status = 'running' AND updated_at_ms > ?",
+            )
+            .bind(&run_id)
+            .bind(now_ms() - STALE_RUN_MS)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            if live.is_some() {
+                return Err(Error::Store(format!(
+                    "conversation {conversation_id} is still running ({run_id})"
+                )));
+            }
         }
 
         let run_ids = "SELECT run_id FROM runs WHERE conversation_id = ?";
@@ -252,9 +274,20 @@ impl Store {
     }
 }
 
+/// Cursor wraps the typed prompt in `<user_query>` inside a larger context block,
+/// so the tag body is the only part worth showing.
 fn short_preview(text: String) -> String {
-    let first_line = text.lines().find(|line| !line.trim().is_empty()).unwrap_or("");
-    let trimmed = first_line.trim();
+    let body = match (text.find("<user_query>"), text.find("</user_query>")) {
+        (Some(start), Some(end)) if end > start + "<user_query>".len() => {
+            &text[start + "<user_query>".len()..end]
+        }
+        _ => text.as_str(),
+    };
+    let single_line = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let trimmed = single_line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('<') {
+        return String::new();
+    }
     if trimmed.chars().count() <= 120 {
         return trimmed.to_string();
     }

@@ -59,8 +59,8 @@ export function ConversationsPage() {
         {items.map((item) => (
           <div className={styles.row} key={item.conversation_id}>
             <span className={styles.preview} title={item.conversation_id}>
-              {item.preview || item.conversation_id.slice(0, 8)}
-              <em className={styles.id}>{item.conversation_id.slice(0, 8)}</em>
+              {item.preview || item.conversation_id}
+              {item.preview && <em className={styles.id}>{item.conversation_id.slice(0, 8)}</em>}
             </span>
             <span className={styles.num}>{item.message_count}</span>
             <span className={styles.num}>{item.checkpoint_count}</span>
