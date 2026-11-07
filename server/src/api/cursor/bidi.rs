@@ -160,18 +160,19 @@ pub fn decode(request: &ai::BidiAppendRequest) -> Result<DecodedAppend> {
         .map(|id| id.request_id.as_str())
         .filter(|id| !id.is_empty())
         .ok_or_else(|| Error::Protocol("BidiAppend request_id is required".into()))?;
-    if !request.data_binary.is_empty() {
-        return Err(Error::Protocol(
-            "BidiAppend data_binary is not part of the captured protocol".into(),
-        ));
-    }
-    if request.data.is_empty() {
+    // Newer clients gate the wire format behind `bidi_append_binary_encoding_disabled`:
+    // when the gate is closed they send the same serialized AgentClientMessage in
+    // `data_binary` instead of hex in `data`. Both carry identical bytes, so accept both.
+    let payload = if !request.data_binary.is_empty() {
+        request.data_binary.clone()
+    } else if request.data.is_empty() {
         return Err(Error::Protocol(
             "BidiAppend contains no AgentClientMessage".into(),
         ));
-    }
-    let payload = hex::decode(&request.data)
-        .map_err(|error| Error::Protocol(format!("invalid BidiAppend hex: {error}")))?;
+    } else {
+        hex::decode(&request.data)
+            .map_err(|error| Error::Protocol(format!("invalid BidiAppend hex: {error}")))?
+    };
     Ok(DecodedAppend {
         request_id: request_id.into(),
         seqno: request.append_seqno,
@@ -208,4 +209,60 @@ pub async fn append(
         })
         .await?;
     Ok(ai::BidiAppendResponse {})
+}
+
+#[cfg(test)]
+mod tests {
+    use prost::Message;
+
+    use super::decode;
+    use crate::cursor::protocol::proto::{agent::v1 as agent, aiserver::v1 as ai};
+
+    fn payload() -> Vec<u8> {
+        agent::AgentClientMessage {
+            message: Some(agent::agent_client_message::Message::ClientHeartbeat(
+                Default::default(),
+            )),
+        }
+        .encode_to_vec()
+    }
+
+    fn request(data: String, data_binary: Vec<u8>) -> ai::BidiAppendRequest {
+        ai::BidiAppendRequest {
+            data,
+            request_id: Some(ai::BidiRequestId {
+                request_id: "request-1".into(),
+            }),
+            append_seqno: 7,
+            data_binary,
+        }
+    }
+
+    #[test]
+    fn decodes_hex_payload() {
+        let decoded = decode(&request(hex::encode(payload()), Vec::new())).unwrap();
+        assert_eq!(decoded.request_id, "request-1");
+        assert_eq!(decoded.seqno, 7);
+        assert!(matches!(
+            decoded.message.message,
+            Some(agent::agent_client_message::Message::ClientHeartbeat(_))
+        ));
+    }
+
+    /// The client switches to `data_binary` once `bidi_append_binary_encoding_disabled`
+    /// is closed; the bytes are identical, so both encodings must decode the same way.
+    #[test]
+    fn decodes_binary_payload() {
+        let decoded = decode(&request(String::new(), payload())).unwrap();
+        assert_eq!(decoded.request_id, "request-1");
+        assert!(matches!(
+            decoded.message.message,
+            Some(agent::agent_client_message::Message::ClientHeartbeat(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_payload() {
+        assert!(decode(&request(String::new(), Vec::new())).is_err());
+    }
 }
