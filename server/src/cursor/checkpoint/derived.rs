@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 
 use prost::Message;
+use serde_json::Value;
 
 use crate::{
     cursor::{
@@ -32,16 +33,9 @@ impl CheckpointBuilder {
         } else {
             changes
         };
-        let todo_values = state
-            .todos
-            .as_ref()
-            .map(|value| {
-                value
-                    .get("todos")
-                    .and_then(serde_json::Value::as_array)
-                    .ok_or_else(|| Error::Protocol("TodoWrite state is missing todos[]".into()))
-            })
-            .transpose()?;
+        // Tolerate shapes that models actually emit: `{"todos": [...]}`, a bare array,
+        // or a wrapper without a todo list at all (then the previous list is kept).
+        let todo_values = state.todos.as_ref().and_then(todo_items);
         let mut todo_ids = if todo_values.is_none() {
             self.base
                 .todos
@@ -52,32 +46,32 @@ impl CheckpointBuilder {
             Vec::new()
         };
         for (index, todo) in todo_values.into_iter().flatten().enumerate() {
-            let status = match todo
-                .get("status")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| Error::Protocol("TodoWrite item is missing status".into()))?
-            {
-                "in_progress" => pb::TodoStatus::InProgress,
-                "completed" => pb::TodoStatus::Completed,
-                "cancelled" => pb::TodoStatus::Cancelled,
-                "pending" => pb::TodoStatus::Pending,
-                status => {
-                    return Err(Error::Protocol(format!(
-                        "unknown TodoWrite status: {status}"
-                    )))
-                }
-            };
+            let id = todo_text(todo, &["id", "key", "slug"])
+                .unwrap_or_else(|| format!("todo-{}", index + 1));
+            let content = todo_text(
+                todo,
+                &[
+                    "content",
+                    "title",
+                    "text",
+                    "description",
+                    "task",
+                    "label",
+                    "summary",
+                ],
+            )
+            .unwrap_or_else(|| {
+                tracing::warn!(
+                    index,
+                    todo_id = %id,
+                    "TodoWrite item has no textual content; using its id as the label"
+                );
+                id.clone()
+            });
+            let status = todo_status(todo);
             let message = pb::TodoItem {
-                id: todo
-                    .get("id")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| Error::Protocol("TodoWrite item is missing id".into()))?
-                    .into(),
-                content: todo
-                    .get("content")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| Error::Protocol("TodoWrite item is missing content".into()))?
-                    .into(),
+                id: id.into(),
+                content: content.into(),
                 status: status as i32,
                 created_at: 0,
                 updated_at: 0,
@@ -99,23 +93,18 @@ impl CheckpointBuilder {
                 todo_ids.push(self.sync.persist(&encoded, &[]).await?);
             }
         }
-        let plan_id = if let Some(value) = state.plan {
-            let text = value
-                .get("plan")
-                .and_then(serde_json::Value::as_str)
-                .or_else(|| value.as_str())
-                .or_else(|| value.get("overview").and_then(serde_json::Value::as_str))
-                .ok_or_else(|| Error::Protocol("plan state has no textual plan".into()))?;
-            let mut encoded = Vec::new();
-            pb::ConversationPlan { plan: text.into() }.encode(&mut encoded)?;
-            let id = BlobId::digest(&encoded);
-            if self.base.plan.as_deref() == Some(id.as_bytes()) {
-                Some(id)
-            } else {
-                Some(self.sync.persist(&encoded, &[]).await?)
+        let plan_id = match state.plan.as_ref().and_then(plan_text) {
+            Some(text) => {
+                let mut encoded = Vec::new();
+                pb::ConversationPlan { plan: text.into() }.encode(&mut encoded)?;
+                let id = BlobId::digest(&encoded);
+                if self.base.plan.as_deref() == Some(id.as_bytes()) {
+                    Some(id)
+                } else {
+                    Some(self.sync.persist(&encoded, &[]).await?)
+                }
             }
-        } else {
-            None
+            None => None,
         };
         Ok((todo_ids, plan_id))
     }
@@ -219,4 +208,113 @@ fn normalize(name: &str) -> String {
         .filter(|character| character.is_ascii_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()
+}
+
+fn todo_items(value: &Value) -> Option<&Vec<Value>> {
+    value
+        .get("todos")
+        .and_then(Value::as_array)
+        .or_else(|| value.as_array())
+}
+
+fn todo_status(todo: &Value) -> pb::TodoStatus {
+    let Some(status) = todo.get("status").and_then(Value::as_str) else {
+        return pb::TodoStatus::Pending;
+    };
+    match normalize(status).as_str() {
+        "inprogress" | "doing" | "active" | "started" => pb::TodoStatus::InProgress,
+        "completed" | "complete" | "done" => pb::TodoStatus::Completed,
+        "cancelled" | "canceled" | "skipped" => pb::TodoStatus::Cancelled,
+        "" | "pending" | "todo" | "notstarted" | "open" => pb::TodoStatus::Pending,
+        normalized => {
+            tracing::warn!(
+                status = %status,
+                normalized,
+                "unknown TodoWrite status; treating it as pending"
+            );
+            pb::TodoStatus::Pending
+        }
+    }
+}
+
+/// Models disagree on todo item labels (`content` / `title` / `text` / ...), and some
+/// emit rich-text arrays instead of a plain string, so accept every shape we have seen.
+fn todo_text(todo: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| value_text(todo.get(*key)?))
+}
+
+fn value_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => {
+            let trimmed = text.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        Value::Array(parts) => {
+            let joined = parts
+                .iter()
+                .filter_map(value_text)
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!joined.is_empty()).then_some(joined)
+        }
+        Value::Object(object) => ["text", "content", "value"]
+            .iter()
+            .find_map(|key| value_text(object.get(*key)?)),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(_) | Value::Null => None,
+    }
+}
+
+fn plan_text(value: &Value) -> Option<String> {
+    if let Some(text) = value_text(value) {
+        return Some(text);
+    }
+    ["plan", "overview", "title", "summary"]
+        .iter()
+        .find_map(|key| value.get(*key).and_then(value_text))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{todo_status, todo_text};
+    use crate::cursor::protocol::proto::agent::v1 as pb;
+
+    #[test]
+    fn todo_text_accepts_alternate_keys_and_rich_text() {
+        assert_eq!(
+            todo_text(&json!({"title": "Run tests"}), &["content", "title"]),
+            Some("Run tests".into())
+        );
+        assert_eq!(
+            todo_text(
+                &json!({"content": [{"type": "text", "text": "Hello"}, {"text": "world"}]}),
+                &["content"]
+            ),
+            Some("Hello world".into())
+        );
+        assert_eq!(
+            todo_text(&json!({"id": "a"}), &["content", "title"]),
+            None,
+            "missing label falls back to the caller, not a protocol error"
+        );
+    }
+
+    #[test]
+    fn todo_status_defaults_to_pending() {
+        assert_eq!(todo_status(&json!({})), pb::TodoStatus::Pending);
+        assert_eq!(
+            todo_status(&json!({"status": "Completed"})),
+            pb::TodoStatus::Completed
+        );
+        assert_eq!(
+            todo_status(&json!({"status": "in-progress"})),
+            pb::TodoStatus::InProgress
+        );
+        assert_eq!(
+            todo_status(&json!({"status": "something-new"})),
+            pb::TodoStatus::Pending
+        );
+    }
 }
