@@ -31,6 +31,11 @@ pub struct App {
 impl App {
     pub async fn new(mut config: Config) -> Result<Self> {
         let store = Store::connect(&config.database_url).await?;
+        // Before the listener is bound and before any request can arrive, so no
+        // conversation can be pruned while it is being served.
+        if let Some(keep_days) = config.retention_days {
+            crate::store::run_startup_retention(&store, keep_days).await;
+        }
         if config.use_persisted_ports {
             config
                 .listen_addr

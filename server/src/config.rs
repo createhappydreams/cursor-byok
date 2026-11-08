@@ -12,6 +12,8 @@ const V0049_DATA_DIR_NAME: &str = ".cursor-local-assistant-v2";
 const V0049_CONFIG_FILE_NAME: &str = "config.yaml";
 const DEFAULT_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const DEFAULT_PROVIDER_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// Conversation data older than this is dropped once, at startup.
+const DEFAULT_RETENTION_DAYS: i64 = 3;
 
 pub fn managed_data_dir() -> Result<PathBuf> {
     let home_dir = dirs::home_dir()
@@ -59,6 +61,8 @@ pub struct Config {
     pub use_persisted_ports: bool,
     /// 面向用户的应用版本;桌面壳会覆盖为自身版本,用于插件 minAppVersion 门控。
     pub app_version: String,
+    /// 启动时清理多少天之前的会话数据;`None` 表示关闭清理。
+    pub retention_days: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -111,6 +115,7 @@ impl Config {
             console,
             use_persisted_ports: false,
             app_version: env!("CARGO_PKG_VERSION").into(),
+            retention_days: retention_days_from_env()?,
         })
     }
 
@@ -125,7 +130,29 @@ impl Config {
             console: None,
             use_persisted_ports: true,
             app_version: env!("CARGO_PKG_VERSION").into(),
+            retention_days: retention_days_from_env()?,
         })
+    }
+}
+
+/// `CURSOR_BYOK_RETENTION_DAYS`: unset keeps the default, `0` or `off` disables
+/// pruning entirely (useful when a session has to survive a restart).
+fn retention_days_from_env() -> Result<Option<i64>> {
+    match env::var("CURSOR_BYOK_RETENTION_DAYS") {
+        Ok(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("off") {
+                return Ok(None);
+            }
+            let days: i64 = trimmed.parse().map_err(|error| {
+                Error::Config(format!("invalid CURSOR_BYOK_RETENTION_DAYS: {error}"))
+            })?;
+            Ok(if days <= 0 { None } else { Some(days) })
+        }
+        Err(env::VarError::NotPresent) => Ok(Some(DEFAULT_RETENTION_DAYS)),
+        Err(error) => Err(Error::Config(format!(
+            "invalid CURSOR_BYOK_RETENTION_DAYS: {error}"
+        ))),
     }
 }
 
