@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 
 use chrono::{Offset, Utc};
 use chrono_tz::Tz;
+use uuid::Uuid;
 
 use crate::{
     cursor::{
@@ -28,14 +29,15 @@ pub(crate) async fn compile_user_message_action(
     compiler: &PromptCompiler,
     blobs: &BlobSynchronizer,
 ) -> Result<CanonicalMessage> {
-    let user = action
+    let mut user = action
         .user_message
-        .as_ref()
+        .clone()
         .ok_or_else(|| Error::Protocol("Cursor user message action has no UserMessage".into()))?;
     if user.message_id.is_empty() {
-        return Err(Error::Protocol(
-            "Cursor user message action has no message_id".into(),
-        ));
+        // Cloud subagent redispatch sends UserMessageAction without a message_id;
+        // synthesize one instead of rejecting the turn (matches the official backend).
+        tracing::warn!("Cursor user message action has no message_id; synthesizing fallback");
+        user.message_id = format!("auto:{}", Uuid::new_v4());
     }
     let mode = if user.mode == pb::AgentMode::Unspecified as i32 {
         current_mode
@@ -59,7 +61,7 @@ pub(crate) async fn compile_user_message_action(
     compile(
         format!("user-message:{}", user.message_id),
         super::run::mode_from_proto(mode)?,
-        user,
+        &user,
         action.request_context.as_ref().unwrap_or(&empty_context),
         &action_context.join("\\n\\n"),
         compiler,

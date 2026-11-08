@@ -133,7 +133,7 @@ pub(crate) async fn prepare(
         starts_turn,
         compacting,
         background_completion,
-    } = action(request)?;
+    } = action(request, request_id)?;
     let checkpoint_mode = if request.subagent_type_name.is_some() {
         Mode::Subagent
     } else {
@@ -399,7 +399,7 @@ fn execution_run_id(request_id: &str) -> RunId {
     RunId::new(format!("{request_id}:{}", &execution_id[..8]))
 }
 
-fn action(request: &pb::AgentRunRequest) -> Result<ActionProjection> {
+fn action(request: &pb::AgentRunRequest, request_id: &str) -> Result<ActionProjection> {
     let conversation_mode = request
         .conversation_state
         .as_ref()
@@ -423,18 +423,28 @@ fn action(request: &pb::AgentRunRequest) -> Result<ActionProjection> {
     };
     match action {
         pb::conversation_action::Action::UserMessageAction(action) => {
-            let user = action.user_message.as_ref().ok_or_else(|| {
-                Error::Protocol("Cursor user message action has no UserMessage".into())
-            })?;
+            let mut user = action
+                .user_message
+                .as_ref()
+                .ok_or_else(|| {
+                    Error::Protocol("Cursor user message action has no UserMessage".into())
+                })?
+                .clone();
             let mode = if user.mode == pb::AgentMode::Unspecified as i32 {
                 conversation_mode.unwrap_or(user.mode)
             } else {
                 user.mode
             };
             if user.message_id.is_empty() {
-                return Err(Error::Protocol(
-                    "Cursor user message action has no message_id".into(),
-                ));
+                // Cloud subagent redispatch (agent-host createConversationAction) sends
+                // UserMessageAction without a message_id when its local replay table has
+                // no checkpoint for the tool call. The official backend synthesizes one
+                // server-side; mirror that instead of rejecting the run.
+                tracing::warn!(
+                    request_id,
+                    "Cursor user message action has no message_id; synthesizing fallback"
+                );
+                user.message_id = format!("auto:{request_id}");
             }
             if user.text.trim() == "/summarize" {
                 return Ok(ActionProjection {
@@ -610,5 +620,48 @@ fn exec_context(
             .unwrap_or_default(),
         admin_command_denylist: request_context.admin_command_denylist.clone(),
         mcp_routes: context::meta_mcp_routes(request_context),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn user_message_request(message_id: &str) -> pb::AgentRunRequest {
+        pb::AgentRunRequest {
+            action: Some(pb::ConversationAction {
+                action: Some(pb::conversation_action::Action::UserMessageAction(
+                    pb::UserMessageAction {
+                        user_message: Some(pb::UserMessage {
+                            text: "resume the task".into(),
+                            message_id: message_id.into(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                )),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn user_message_action_without_message_id_gets_fallback() {
+        let request = user_message_request("");
+        let projection = action(&request, "req-1").expect("empty message_id must not reject");
+        let user = projection.turn_user.expect("turn_user present");
+        assert_eq!(user.message_id, "auto:req-1");
+        assert!(projection.starts_turn);
+        assert_eq!(projection.input_id.as_deref(), Some("cursor:user:auto:req-1"));
+    }
+
+    #[test]
+    fn user_message_action_keeps_existing_message_id() {
+        let request = user_message_request("client-id-1");
+        let projection = action(&request, "req-2").expect("action must succeed");
+        let user = projection.turn_user.expect("turn_user present");
+        assert_eq!(user.message_id, "client-id-1");
+        assert_eq!(projection.input_id.as_deref(), Some("cursor:user:client-id-1"));
     }
 }

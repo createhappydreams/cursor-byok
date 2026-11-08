@@ -832,16 +832,23 @@ impl ConversationOutput {
 
     async fn forward_user_message(
         &mut self,
-        action: pb::UserMessageAction,
+        mut action: pb::UserMessageAction,
         active_round: Option<&ToolRoundId>,
         active_tool_calls: &HashSet<String>,
         completions: &HashMap<String, ToolCompletion>,
         interrupted_rounds: &mut HashSet<ToolRoundId>,
         interrupted_tool_calls: &mut HashSet<String>,
     ) -> Result<()> {
-        let user_message = action.user_message.clone().ok_or_else(|| {
+        let mut user_message = action.user_message.clone().ok_or_else(|| {
             Error::Protocol("Cursor user message action has no UserMessage".into())
         })?;
+        if user_message.message_id.is_empty() {
+            // Cloud subagent redispatch sends UserMessageAction without a message_id;
+            // synthesize one so the queued injection keeps a stable identity.
+            tracing::warn!("Cursor user message action has no message_id; synthesizing fallback");
+            user_message.message_id = format!("auto:{}", uuid::Uuid::new_v4());
+            action.user_message = Some(user_message.clone());
+        }
         let injection_id = format!("user-message:{}", user_message.message_id);
         let message = compile_user_message_action(
             &action,
