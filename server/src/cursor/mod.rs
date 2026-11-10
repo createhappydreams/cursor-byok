@@ -2,6 +2,7 @@
 
 pub mod checkpoint;
 pub mod compile;
+pub mod composer_headers;
 pub mod conversation;
 pub mod prompting;
 pub mod protocol;

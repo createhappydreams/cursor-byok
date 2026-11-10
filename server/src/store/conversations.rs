@@ -18,6 +18,11 @@ pub struct ConversationSummary {
     pub conversation_id: String,
     /// First user prompt, trimmed for display. Empty when the conversation has none.
     pub preview: String,
+    /// Sidebar label Cursor shows for this chat, when its database is readable.
+    pub title: String,
+    /// Workspace folder the chat belongs to, from the same source.
+    pub workspace: String,
+    pub subagent: bool,
     pub message_count: i64,
     pub checkpoint_count: i64,
     pub last_used_ms: i64,
@@ -158,6 +163,9 @@ impl Store {
                 message_count: row.get(2),
                 checkpoint_count: row.get(3),
                 preview: short_preview(row.get(4)),
+                title: String::new(),
+                workspace: String::new(),
+                subagent: false,
             })
             .collect())
     }

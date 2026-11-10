@@ -478,6 +478,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export interface ConversationSummary {
   conversation_id: string;
   preview: string;
+  /** Sidebar label Cursor shows for this chat; empty when its database is unreadable. */
+  title: string;
+  /** Workspace folder the chat belongs to, from the same source. */
+  workspace: string;
+  subagent: boolean;
   message_count: number;
   checkpoint_count: number;
   last_used_ms: number;
@@ -488,6 +493,8 @@ export interface PurgedConversation {
   checkpoints: number;
   runs: number;
   llm_calls: number;
+  /** Rows removed from Cursor's sidebar database; null when it could not be reached. */
+  cursor_rows: number | null;
 }
 
 export const api = {

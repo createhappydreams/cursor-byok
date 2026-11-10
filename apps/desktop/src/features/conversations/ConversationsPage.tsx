@@ -4,6 +4,24 @@ import { api, type ConversationSummary } from "../../shared/api";
 import { useMessage } from "../../shared/ui/message";
 import styles from "./ConversationsPage.module.scss";
 
+function folderName(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  return trimmed.split(/[\\/]/).pop() ?? "";
+}
+
+function labelOf(item: ConversationSummary): string {
+  return item.title || item.preview || item.conversation_id;
+}
+
+function metaOf(item: ConversationSummary): string {
+  const parts: string[] = [];
+  const folder = folderName(item.workspace);
+  if (folder) parts.push(folder);
+  if (item.subagent) parts.push(t("子智能体"));
+  parts.push(item.conversation_id.slice(0, 8));
+  return parts.join(" · ");
+}
+
 export function ConversationsPage() {
   const [items, setItems] = useState<ConversationSummary[]>([]);
   const [pending, setPending] = useState<string | null>(null);
@@ -23,17 +41,32 @@ export function ConversationsPage() {
   }, [refresh]);
 
   const remove = async (item: ConversationSummary) => {
-    const label = item.preview || item.conversation_id.slice(0, 8);
-    if (!window.confirm(t("删除后本地不再保留这段对话的数据，Cursor 侧再次打开会重新导入。确定删除？") + "\n" + label)) {
+    const label = labelOf(item);
+    if (
+      !window.confirm(
+        t("删除后本地不再保留这段对话的数据；若 Cursor 已退出，侧边栏条目也会一并删除。确定删除？") +
+          "\n" +
+          label,
+      )
+    ) {
       return;
     }
     setPending(item.conversation_id);
     try {
       const report = await api.deleteConversation(item.conversation_id);
-      showMessage(
-        t("已删除该会话的本地数据")
-          + ` · ${report.messages} ${t("条消息")} / ${report.checkpoints} ${t("个快照")}`,
-      );
+      const hadLocalData = report.messages > 0 || report.checkpoints > 0;
+      let text = hadLocalData
+        ? t("已删除该会话的本地数据") +
+          ` · ${report.messages} ${t("条消息")} / ${report.checkpoints} ${t("个快照")}`
+        : t("本地已无该会话的数据");
+      if (report.cursor_rows === null) {
+        text += t("；Cursor 仍在运行，侧边栏条目未删除，退出 Cursor 后再删一次");
+      } else if (report.cursor_rows > 0) {
+        text += t("；Cursor 侧边栏条目已同步移除");
+      } else if (hadLocalData) {
+        text += t("；Cursor 侧未找到对应条目");
+      }
+      showMessage(text);
       refresh();
     } catch (error: unknown) {
       showMessage(error instanceof Error ? error.message : String(error));
@@ -58,9 +91,9 @@ export function ConversationsPage() {
         </div>
         {items.map((item) => (
           <div className={styles.row} key={item.conversation_id}>
-            <span className={styles.preview} title={item.conversation_id}>
-              {item.preview || item.conversation_id}
-              {item.preview && <em className={styles.id}>{item.conversation_id.slice(0, 8)}</em>}
+            <span className={styles.preview} title={`${labelOf(item)}\n${item.conversation_id}`}>
+              <span className={styles.title}>{labelOf(item)}</span>
+              <span className={styles.meta}>{metaOf(item)}</span>
             </span>
             <span className={styles.num}>{item.message_count}</span>
             <span className={styles.num}>{item.checkpoint_count}</span>
