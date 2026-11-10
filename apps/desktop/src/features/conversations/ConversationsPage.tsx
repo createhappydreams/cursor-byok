@@ -1,8 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageContent } from "../../shell/layout/PageContent";
 import { api, type ConversationSummary } from "../../shared/api";
 import { useMessage } from "../../shared/ui/message";
 import styles from "./ConversationsPage.module.scss";
+
+const UNGROUPED = "__ungrouped__";
+
+interface Group {
+  key: string;
+  /** Folder name shown as the project heading. */
+  label: string;
+  /** Full workspace path, kept for the tooltip. */
+  path: string;
+  items: ConversationSummary[];
+  lastUsed: number;
+}
 
 function folderName(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, "");
@@ -15,15 +27,42 @@ function labelOf(item: ConversationSummary): string {
 
 function metaOf(item: ConversationSummary): string {
   const parts: string[] = [];
-  const folder = folderName(item.workspace);
-  if (folder) parts.push(folder);
   if (item.subagent) parts.push(t("子智能体"));
   parts.push(item.conversation_id.slice(0, 8));
   return parts.join(" · ");
 }
 
+/** Cursor groups chats by workspace folder; mirror that so a project can be scanned at a glance. */
+function groupConversations(items: ConversationSummary[]): Group[] {
+  const map = new Map<string, Group>();
+  for (const item of items) {
+    const path = item.workspace.trim();
+    const key = path || UNGROUPED;
+    let group = map.get(key);
+    if (!group) {
+      group = {
+        key,
+        label: path ? folderName(path) : t("未归类"),
+        path,
+        items: [],
+        lastUsed: 0,
+      };
+      map.set(key, group);
+    }
+    group.items.push(item);
+    if (item.last_used_ms > group.lastUsed) group.lastUsed = item.last_used_ms;
+  }
+  const groups = [...map.values()];
+  for (const group of groups) {
+    group.items.sort((a, b) => b.last_used_ms - a.last_used_ms);
+  }
+  groups.sort((a, b) => b.lastUsed - a.lastUsed);
+  return groups;
+}
+
 export function ConversationsPage() {
   const [items, setItems] = useState<ConversationSummary[]>([]);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [pending, setPending] = useState<string | null>(null);
   const showMessage = useMessage();
 
@@ -39,6 +78,12 @@ export function ConversationsPage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const groups = useMemo(() => groupConversations(items), [items]);
+
+  const toggleGroup = (key: string) => {
+    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const removeLocal = async (item: ConversationSummary) => {
     if (
@@ -95,7 +140,9 @@ export function ConversationsPage() {
     <div className={styles.page}>
       <div className={styles.header}>
         <span className={styles.count}>{items.length}</span>
-        <span className={styles.hint}>{t("按最后使用时间排序")}</span>
+        <span className={styles.hint}>
+          {t("按项目分组")} · {t("先完全退出 Cursor 再清侧边栏")}
+        </span>
       </div>
       <div className={styles.table}>
         <div className={styles.row + " " + styles.head}>
@@ -105,37 +152,64 @@ export function ConversationsPage() {
           <span className={styles.time}>{t("最后使用")}</span>
           <span className={styles.action} />
         </div>
-        {items.map((item) => (
-          <div className={styles.row} key={item.conversation_id}>
-            <span className={styles.preview} title={`${labelOf(item)}\n${item.conversation_id}`}>
-              <span className={styles.title}>{labelOf(item)}</span>
-              <span className={styles.meta}>{metaOf(item)}</span>
-            </span>
-            <span className={styles.num}>{item.message_count}</span>
-            <span className={styles.num}>{item.checkpoint_count}</span>
-            <span className={styles.time}>
-              {new Date(item.last_used_ms).toLocaleString()}
-            </span>
-            <span className={styles.action}>
+        {groups.map((group) => {
+          const isCollapsed = Boolean(collapsed[group.key]);
+          return (
+            <div className={styles.group} key={group.key}>
               <button
                 type="button"
-                className={styles.sidebar}
-                disabled={pending === item.conversation_id}
-                onClick={() => void removeSidebar(item)}
+                className={styles.groupHead}
+                title={group.path || t("未归类")}
+                onClick={() => toggleGroup(group.key)}
               >
-                {t("清侧边栏")}
+                <span className={styles.caret}>{isCollapsed ? "▸" : "▾"}</span>
+                <span className={styles.folder} aria-hidden="true">
+                  {isCollapsed ? "📁" : "📂"}
+                </span>
+                <span className={styles.groupName}>{group.label}</span>
+                <span className={styles.groupCount}>{group.items.length}</span>
+                <span className={styles.groupTime}>
+                  {new Date(group.lastUsed).toLocaleString()}
+                </span>
               </button>
-              <button
-                type="button"
-                className={styles.delete}
-                disabled={pending === item.conversation_id}
-                onClick={() => void removeLocal(item)}
-              >
-                {pending === item.conversation_id ? t("删除中") : t("删除")}
-              </button>
-            </span>
-          </div>
-        ))}
+              {!isCollapsed &&
+                group.items.map((item) => (
+                  <div className={styles.row + " " + styles.item} key={item.conversation_id}>
+                    <span
+                      className={styles.preview}
+                      title={`${labelOf(item)}\n${item.conversation_id}`}
+                    >
+                      <span className={styles.title}>{labelOf(item)}</span>
+                      <span className={styles.meta}>{metaOf(item)}</span>
+                    </span>
+                    <span className={styles.num}>{item.message_count}</span>
+                    <span className={styles.num}>{item.checkpoint_count}</span>
+                    <span className={styles.time}>
+                      {new Date(item.last_used_ms).toLocaleString()}
+                    </span>
+                    <span className={styles.action}>
+                      <button
+                        type="button"
+                        className={styles.sidebar}
+                        disabled={pending === item.conversation_id}
+                        onClick={() => void removeSidebar(item)}
+                      >
+                        {t("清侧边栏")}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.delete}
+                        disabled={pending === item.conversation_id}
+                        onClick={() => void removeLocal(item)}
+                      >
+                        {pending === item.conversation_id ? t("删除中") : t("删除")}
+                      </button>
+                    </span>
+                  </div>
+                ))}
+            </div>
+          );
+        })}
         {items.length === 0 && <div className={styles.empty}>{t("暂无会话数据")}</div>}
       </div>
     </div>
