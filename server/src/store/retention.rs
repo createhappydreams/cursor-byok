@@ -1,15 +1,18 @@
-//! Startup retention for conversation state.
+//! Retention for conversation state.
 //!
 //! The server stores every message, checkpoint, tool round and content-addressed
 //! blob it is handed, and `purge_conversation` deliberately leaves blobs to an
 //! orphan sweep that does not exist. A long-lived install therefore grows
 //! without bound: blob edges alone can outweigh the blobs they describe.
 //!
-//! This runs once at startup, before the listener is bound, so it never races
-//! with a live request and never needs to interrupt one. Dropping old blobs is
-//! safe by design: `run/engine.rs` already keeps tool results usable when a
-//! referenced blob is gone, and `context_sync` asks the client to re-send what
-//! it no longer has.
+//! Pruning runs in the background after the listener is bound. It used to run
+//! before `bind`, which on a 1 GB database kept the port closed for minutes and
+//! made every extra launch pile up on the write lock. Work is chunked now so a
+//! batch holds the lock for milliseconds instead of the whole sweep.
+//!
+//! Dropping old blobs is safe by design: `run/engine.rs` keeps tool results
+//! usable when a referenced blob is gone, and `context_sync` asks the client to
+//! re-send what it no longer has.
 
 use serde::Serialize;
 
@@ -45,6 +48,13 @@ impl PruneReport {
 /// pages are worth the I/O.
 const VACUUM_THRESHOLD_BYTES: u64 = 128 * 1024 * 1024;
 
+/// Conversations deleted per transaction. Two keeps a batch well under a second
+/// even when each one owns thousands of messages and checkpoints.
+const CONVERSATION_BATCH: usize = 2;
+
+/// Blobs deleted per transaction, with the edges that reference them.
+const BLOB_BATCH: usize = 3_000;
+
 /// Runs retention once and logs the outcome. Failures never block startup.
 pub async fn run_startup_retention(store: &Store, keep_days: i64) {
     match store.prune_old_data(keep_days).await {
@@ -79,29 +89,10 @@ impl Store {
         // one is treated as live, otherwise nothing would ever be prunable.
         let stale_after = now_ms() - 3_600_000;
 
-        let _write = self.writes.lock().await;
         let mut report = PruneReport::default();
-        let mut transaction = self.pool.begin().await?;
 
-        // Checkpoint rows reference each other, so the final state is only
-        // consistent at commit time.
-        sqlx::query("PRAGMA defer_foreign_keys = ON")
-            .execute(&mut *transaction)
-            .await?;
-
-        sqlx::query(
-            "CREATE TEMP TABLE IF NOT EXISTS prune_conversations(
-                conversation_id TEXT PRIMARY KEY
-             )",
-        )
-        .execute(&mut *transaction)
-        .await?;
-        sqlx::query("DELETE FROM prune_conversations")
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query(
-            "INSERT INTO prune_conversations(conversation_id)
-             SELECT conversation_id FROM conversations
+        let conversations: Vec<String> = sqlx::query_scalar(
+            "SELECT conversation_id FROM conversations
              WHERE updated_at_ms < ?
                AND (
                  active_run_id IS NULL
@@ -115,12 +106,86 @@ impl Store {
         )
         .bind(cutoff)
         .bind(stale_after)
-        .execute(&mut *transaction)
+        .fetch_all(&self.pool)
         .await?;
 
-        // Order mirrors Store::purge_conversation so no child outlives its parent.
-        // The label decides which counter the affected rows land in.
-        const CONVERSATION_STATEMENTS: [(&str, &str); 13] = [
+        for batch in conversations.chunks(CONVERSATION_BATCH) {
+            let pruned = self.prune_conversations(batch).await?;
+            report.conversations += pruned.conversations;
+            report.messages += pruned.messages;
+            report.checkpoints += pruned.checkpoints;
+            tokio::task::yield_now().await;
+        }
+
+        let blobs: Vec<Vec<u8>> =
+            sqlx::query_scalar("SELECT blob_id FROM blobs WHERE created_at_ms < ?")
+                .bind(cutoff)
+                .fetch_all(&self.pool)
+                .await?;
+
+        for batch in blobs.chunks(BLOB_BATCH) {
+            let (edges, removed) = self.prune_blobs(batch).await?;
+            report.blob_edges += edges;
+            report.blobs += removed;
+            tokio::task::yield_now().await;
+        }
+
+        let page_size: i64 = sqlx::query_scalar("PRAGMA page_size")
+            .fetch_one(&self.pool)
+            .await?;
+        let freelist: i64 = sqlx::query_scalar("PRAGMA freelist_count")
+            .fetch_one(&self.pool)
+            .await?;
+        report.reclaimed_bytes = (page_size.max(0) * freelist.max(0)) as u64;
+
+        if report.reclaimed_bytes >= VACUUM_THRESHOLD_BYTES {
+            let _write = self.writes.lock().await;
+            sqlx::query("VACUUM").execute(&self.pool).await?;
+            report.vacuumed = true;
+        }
+
+        // Keep the WAL from staying fat after a large sweep.
+        let _write = self.writes.lock().await;
+        if let Err(error) = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&self.pool)
+            .await
+        {
+            tracing::debug!(%error, "retention: wal checkpoint skipped");
+        }
+
+        Ok(report)
+    }
+
+    /// Deletes one chunk of conversations and every child row that hangs off
+    /// them. Order mirrors `purge_conversation` so no child outlives its parent;
+    /// checkpoint rows reference each other, so the final state is only
+    /// consistent at commit time.
+    async fn prune_conversations(&self, batch: &[String]) -> Result<PruneReport> {
+        let mut report = PruneReport::default();
+        let _write = self.writes.lock().await;
+        let mut transaction = self.pool.begin().await?;
+
+        sqlx::query("PRAGMA defer_foreign_keys = ON")
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query(
+            "CREATE TEMP TABLE IF NOT EXISTS prune_conversations(
+                conversation_id TEXT PRIMARY KEY
+             )",
+        )
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query("DELETE FROM prune_conversations")
+            .execute(&mut *transaction)
+            .await?;
+        for id in batch {
+            sqlx::query("INSERT OR IGNORE INTO prune_conversations(conversation_id) VALUES (?)")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+
+        const STATEMENTS: [(&str, &str); 13] = [
             ("other", "DELETE FROM tool_round_calls WHERE round_id IN (
                  SELECT round_id FROM tool_rounds
                  WHERE run_id IN (SELECT run_id FROM runs
@@ -155,7 +220,7 @@ impl Store {
              WHERE conversation_id IN (SELECT conversation_id FROM prune_conversations)"),
         ];
 
-        for (kind, statement) in CONVERSATION_STATEMENTS {
+        for (kind, statement) in STATEMENTS {
             let affected = sqlx::query(statement)
                 .execute(&mut *transaction)
                 .await?
@@ -168,22 +233,33 @@ impl Store {
             }
         }
 
-        // Blobs are a cache: drop the ones that predate the cutoff, then the
-        // edges that now point at nothing.
-        sqlx::query(
-            "CREATE TEMP TABLE IF NOT EXISTS prune_blobs(blob_id BLOB PRIMARY KEY)",
-        )
-        .execute(&mut *transaction)
-        .await?;
+        sqlx::query("DROP TABLE prune_conversations")
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+        Ok(report)
+    }
+
+    /// Deletes one chunk of blobs plus the edges that point at them.
+    /// Returns `(edges_removed, blobs_removed)`.
+    async fn prune_blobs(&self, batch: &[Vec<u8>]) -> Result<(u64, u64)> {
+        let _write = self.writes.lock().await;
+        let mut transaction = self.pool.begin().await?;
+
+        sqlx::query("CREATE TEMP TABLE IF NOT EXISTS prune_blobs(blob_id BLOB PRIMARY KEY)")
+            .execute(&mut *transaction)
+            .await?;
         sqlx::query("DELETE FROM prune_blobs")
             .execute(&mut *transaction)
             .await?;
-        sqlx::query("INSERT INTO prune_blobs(blob_id) SELECT blob_id FROM blobs WHERE created_at_ms < ?")
-            .bind(cutoff)
-            .execute(&mut *transaction)
-            .await?;
+        for id in batch {
+            sqlx::query("INSERT OR IGNORE INTO prune_blobs(blob_id) VALUES (?)")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+        }
 
-        report.blob_edges = sqlx::query(
+        let edges = sqlx::query(
             "DELETE FROM blob_edges
              WHERE parent_blob_id IN (SELECT blob_id FROM prune_blobs)
                 OR child_blob_id IN (SELECT blob_id FROM prune_blobs)",
@@ -191,7 +267,7 @@ impl Store {
         .execute(&mut *transaction)
         .await?
         .rows_affected();
-        report.blobs = sqlx::query("DELETE FROM blobs WHERE blob_id IN (SELECT blob_id FROM prune_blobs)")
+        let blobs = sqlx::query("DELETE FROM blobs WHERE blob_id IN (SELECT blob_id FROM prune_blobs)")
             .execute(&mut *transaction)
             .await?
             .rows_affected();
@@ -199,25 +275,7 @@ impl Store {
         sqlx::query("DROP TABLE prune_blobs")
             .execute(&mut *transaction)
             .await?;
-        sqlx::query("DROP TABLE prune_conversations")
-            .execute(&mut *transaction)
-            .await?;
-
         transaction.commit().await?;
-
-        let page_size: i64 = sqlx::query_scalar("PRAGMA page_size")
-            .fetch_one(&self.pool)
-            .await?;
-        let freelist: i64 = sqlx::query_scalar("PRAGMA freelist_count")
-            .fetch_one(&self.pool)
-            .await?;
-        report.reclaimed_bytes = (page_size.max(0) * freelist.max(0)) as u64;
-
-        if report.reclaimed_bytes >= VACUUM_THRESHOLD_BYTES {
-            sqlx::query("VACUUM").execute(&self.pool).await?;
-            report.vacuumed = true;
-        }
-
-        Ok(report)
+        Ok((edges, blobs))
     }
 }

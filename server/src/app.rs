@@ -1,5 +1,10 @@
 //! Assembles server dependencies and starts the application services.
-use std::{future::IntoFuture, net::SocketAddr, time::Duration};
+use std::{
+    future::IntoFuture,
+    net::SocketAddr,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -26,16 +31,15 @@ pub struct App {
     registry: TransportRegistry,
     harness: CursorHarness,
     store: Store,
+    /// Retention is spawned once, after the listener is live. Pruning deletes
+    /// hundreds of thousands of rows, which used to run before `bind` and left
+    /// the port closed for minutes.
+    retention_started: AtomicBool,
 }
 
 impl App {
     pub async fn new(mut config: Config) -> Result<Self> {
         let store = Store::connect(&config.database_url).await?;
-        // Before the listener is bound and before any request can arrive, so no
-        // conversation can be pruned while it is being served.
-        if let Some(keep_days) = config.retention_days {
-            crate::store::run_startup_retention(&store, keep_days).await;
-        }
         if config.use_persisted_ports {
             config
                 .listen_addr
@@ -101,6 +105,7 @@ impl App {
             harness,
             store,
             config,
+            retention_started: AtomicBool::new(false),
         })
     }
 
@@ -117,7 +122,30 @@ impl App {
                 .set_service_port(listener.local_addr()?.port())
                 .await?;
         }
+        self.spawn_retention();
         Ok(listener)
+    }
+
+    /// Prunes old conversation state in the background, once the port is live.
+    ///
+    /// This used to run inside `App::new`, before the listener was bound: a 1 GB
+    /// database needed four minutes to delete ~120k blob edges and 16k
+    /// checkpoints, during which the port stayed closed and every extra launch
+    /// piled up on the write lock.
+    fn spawn_retention(&self) {
+        let Some(keep_days) = self.config.retention_days else {
+            return;
+        };
+        if self.retention_started.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let store = self.store.clone();
+        tokio::spawn(async move {
+            // Give the first client requests a clear run at the database before
+            // pruning starts taking write locks in batches.
+            tokio::time::sleep(Duration::from_secs(20)).await;
+            crate::store::run_startup_retention(&store, keep_days).await;
+        });
     }
 
     pub fn harness(&self) -> CursorHarness {
