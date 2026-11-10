@@ -30,37 +30,40 @@ pub async fn list(State(service): State<ControlService>) -> Result<Json<Vec<Conv
     Ok(Json(items))
 }
 
-#[derive(Serialize)]
-pub struct PurgeResponse {
-    #[serde(flatten)]
-    purged: PurgedConversation,
-    /// Rows removed from Cursor's own sidebar database. `None` when it could not
-    /// be reached — usually because Cursor is still running and holds it open.
-    cursor_rows: Option<u64>,
-}
-
+/// Removes only the data this server stored. Cursor's own copy is left alone on
+/// purpose: touching its database is risky, so it is a separate action the user
+/// triggers from the sidebar button.
 pub async fn remove(
     State(service): State<ControlService>,
     Path(conversation_id): Path<String>,
-) -> Result<Json<PurgeResponse>> {
-    let purged = service.purge_conversation(&conversation_id).await?;
-    // The sidebar entry is deleted even when the local data is already gone:
-    // the first attempt can fail because Cursor was running, and the user needs
-    // a way to retry after closing it.
-    let cursor_rows = match composer_headers::forget(&[conversation_id.clone()]).await {
-        Ok(rows) => Some(rows),
-        Err(error) => {
-            tracing::warn!(%error, "cursor sidebar entry was not removed");
-            None
-        }
-    };
-    if purged.is_none() && !matches!(cursor_rows, Some(rows) if rows > 0) {
-        return Err(Error::Store(format!(
+) -> Result<Json<PurgedConversation>> {
+    match service.purge_conversation(&conversation_id).await? {
+        Some(report) => Ok(Json(report)),
+        None => Err(Error::Store(format!(
             "conversation {conversation_id} is not stored"
-        )));
+        ))),
     }
-    Ok(Json(PurgeResponse {
-        purged: purged.unwrap_or_default(),
-        cursor_rows,
+}
+
+#[derive(Serialize)]
+pub struct SidebarRemoval {
+    /// Rows deleted from Cursor's `state.vscdb`.
+    pub removed: u64,
+    /// Whether any row matched, i.e. the chat existed in the sidebar.
+    pub found: bool,
+}
+
+/// Drops the Cursor-side rows so the chat disappears from its sidebar.
+///
+/// Deliberately separate from [`remove`]: it writes to another application's
+/// database, so the user asks for it explicitly and is told to close Cursor
+/// first — otherwise Cursor rewrites the rows from memory.
+pub async fn remove_sidebar_entry(
+    Path(conversation_id): Path<String>,
+) -> Result<Json<SidebarRemoval>> {
+    let removed = composer_headers::forget(&[conversation_id]).await?;
+    Ok(Json(SidebarRemoval {
+        removed,
+        found: removed > 0,
     }))
 }

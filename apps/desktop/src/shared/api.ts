@@ -493,8 +493,13 @@ export interface PurgedConversation {
   checkpoints: number;
   runs: number;
   llm_calls: number;
-  /** Rows removed from Cursor's sidebar database; null when it could not be reached. */
-  cursor_rows: number | null;
+}
+
+export interface SidebarRemoval {
+  /** Rows deleted from Cursor's state database. */
+  removed: number;
+  /** Whether the chat existed in Cursor's sidebar at all. */
+  found: boolean;
 }
 
 export const api = {
@@ -559,6 +564,7 @@ export const api = {
   calls: () => request<LlmCall[]>("/llm-calls?limit=200"),
   conversations: () => request<ConversationSummary[]>("/conversations"),
   deleteConversation: (id: string) => request<PurgedConversation>(`/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  deleteSidebarEntry: (id: string) => request<SidebarRemoval>(`/conversations/${encodeURIComponent(id)}/sidebar-entry`, { method: "DELETE" }),
   call: (id: string) => request<CallDetail>(`/llm-calls/${encodeURIComponent(id)}`),
   openCallDetails: async (id: string) => {
     const url = new URL(window.location.href);

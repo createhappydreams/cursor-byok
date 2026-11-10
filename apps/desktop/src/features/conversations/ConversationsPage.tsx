@@ -40,13 +40,12 @@ export function ConversationsPage() {
     refresh();
   }, [refresh]);
 
-  const remove = async (item: ConversationSummary) => {
-    const label = labelOf(item);
+  const removeLocal = async (item: ConversationSummary) => {
     if (
       !window.confirm(
-        t("删除后本地不再保留这段对话的数据；若 Cursor 已退出，侧边栏条目也会一并删除。确定删除？") +
+        t("删除后本地不再保留这段对话的数据。Cursor 侧边栏条目会保留，如需一并移除请先点「清侧边栏」。确定删除？") +
           "\n" +
-          label,
+          labelOf(item),
       )
     ) {
       return;
@@ -54,19 +53,36 @@ export function ConversationsPage() {
     setPending(item.conversation_id);
     try {
       const report = await api.deleteConversation(item.conversation_id);
-      const hadLocalData = report.messages > 0 || report.checkpoints > 0;
-      let text = hadLocalData
-        ? t("已删除该会话的本地数据") +
-          ` · ${report.messages} ${t("条消息")} / ${report.checkpoints} ${t("个快照")}`
-        : t("本地已无该会话的数据");
-      if (report.cursor_rows === null) {
-        text += t("；Cursor 仍在运行，侧边栏条目未删除，退出 Cursor 后再删一次");
-      } else if (report.cursor_rows > 0) {
-        text += t("；Cursor 侧边栏条目已同步移除");
-      } else if (hadLocalData) {
-        text += t("；Cursor 侧未找到对应条目");
-      }
-      showMessage(text);
+      showMessage(
+        t("已删除该会话的本地数据") +
+          ` · ${report.messages} ${t("条消息")} / ${report.checkpoints} ${t("个快照")}`,
+      );
+      refresh();
+    } catch (error: unknown) {
+      showMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const removeSidebar = async (item: ConversationSummary) => {
+    if (
+      !window.confirm(
+        t("这会直接修改 Cursor 的数据库，删除该对话在侧边栏的条目（含对话内容与气泡数据）。请先完全退出 Cursor，否则修改会被写回。确定继续？") +
+          "\n" +
+          labelOf(item),
+      )
+    ) {
+      return;
+    }
+    setPending(item.conversation_id);
+    try {
+      const report = await api.deleteSidebarEntry(item.conversation_id);
+      showMessage(
+        report.found
+          ? t("已移除 Cursor 侧边栏条目") + ` · ${report.removed} ${t("行")}`
+          : t("Cursor 侧没有找到这条对话的条目；若 Cursor 仍在运行，请退出后再试"),
+      );
       refresh();
     } catch (error: unknown) {
       showMessage(error instanceof Error ? error.message : String(error));
@@ -103,9 +119,17 @@ export function ConversationsPage() {
             <span className={styles.action}>
               <button
                 type="button"
+                className={styles.sidebar}
+                disabled={pending === item.conversation_id}
+                onClick={() => void removeSidebar(item)}
+              >
+                {t("清侧边栏")}
+              </button>
+              <button
+                type="button"
                 className={styles.delete}
                 disabled={pending === item.conversation_id}
-                onClick={() => void remove(item)}
+                onClick={() => void removeLocal(item)}
               >
                 {pending === item.conversation_id ? t("删除中") : t("删除")}
               </button>

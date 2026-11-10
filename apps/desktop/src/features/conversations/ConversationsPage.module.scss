@@ -37,7 +37,7 @@
 
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px 72px 150px 72px;
+  grid-template-columns: minmax(0, 1fr) 64px 64px 140px 160px;
   gap: 12px;
   align-items: center;
   padding: 10px 8px;
@@ -88,7 +88,30 @@
 }
 
 .action {
-  text-align: right;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.sidebar {
+  padding: 3px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.28);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sidebar:hover:not(:disabled) {
+  border-color: #ba7517;
+  color: #ba7517;
+}
+
+.sidebar:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .delete {
