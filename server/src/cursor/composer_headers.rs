@@ -41,12 +41,112 @@ struct HeaderValue {
 struct WorkspaceIdentifier {
     #[serde(default)]
     uri: Option<WorkspaceUri>,
+    /// Multi-root windows carry the folder list elsewhere: a `.code-workspace`
+    /// file, or a generated `workspace.json`. Only `uri` is populated for the
+    /// single-folder case, which is why both shapes must be handled.
+    #[serde(default, rename = "configPath")]
+    config_path: Option<WorkspaceUri>,
 }
 
 #[derive(Deserialize)]
 struct WorkspaceUri {
     #[serde(default, rename = "fsPath")]
     fs_path: String,
+}
+
+impl WorkspaceIdentifier {
+    /// Folder the chat belongs to, or empty when Cursor recorded no workspace.
+    fn folder(self) -> String {
+        if let Some(uri) = self.uri {
+            if !uri.fs_path.is_empty() {
+                return uri.fs_path;
+            }
+        }
+        let Some(config) = self.config_path else {
+            return String::new();
+        };
+        if config.fs_path.is_empty() {
+            return String::new();
+        }
+        workspace_from_config(&config.fs_path)
+    }
+}
+
+/// Turns a `configPath` into something the console can group by.
+///
+/// A `.code-workspace` file already names the project, so its own path is the
+/// label Cursor shows. A generated `workspace.json` is only an opaque hash
+/// directory, so its first folder stands in for the project instead.
+fn workspace_from_config(fs_path: &str) -> String {
+    let path = PathBuf::from(fs_path);
+    let is_code_workspace = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("code-workspace"));
+    if is_code_workspace {
+        return fs_path.to_string();
+    }
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return String::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return String::new();
+    };
+    let Some(first) = value
+        .get("folders")
+        .and_then(|folders| folders.as_array())
+        .and_then(|folders| folders.first())
+    else {
+        return String::new();
+    };
+    if let Some(uri) = first.get("uri").and_then(|uri| uri.as_str()) {
+        return file_uri_to_path(uri);
+    }
+    first
+        .get("path")
+        .and_then(|path| path.as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// `file:///c%3A/Users/me/project` -> `c:/Users/me/project`.
+fn file_uri_to_path(uri: &str) -> String {
+    let rest = uri.strip_prefix("file://").unwrap_or(uri);
+    let decoded = percent_decode(rest);
+    let trimmed = decoded.strip_prefix('/').unwrap_or(&decoded);
+    // Keep POSIX paths intact: only Windows drive letters lose the leading slash.
+    if trimmed.as_bytes().get(1) == Some(&b':') {
+        trimmed.to_string()
+    } else {
+        decoded
+    }
+}
+
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let (Some(high), Some(low)) = (hex_value(bytes[index + 1]), hex_value(bytes[index + 2])) {
+                out.push(high * 16 + low);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// `state.vscdb` of the Cursor install that shares this machine.
@@ -114,11 +214,7 @@ pub async fn load() -> HashMap<String, CursorComposer> {
             id,
             CursorComposer {
                 name: parsed.name,
-                workspace: parsed
-                    .workspace
-                    .and_then(|workspace| workspace.uri)
-                    .map(|uri| uri.fs_path)
-                    .unwrap_or_default(),
+                workspace: parsed.workspace.map(WorkspaceIdentifier::folder).unwrap_or_default(),
                 subagent: subagent != "0" && !subagent.is_empty(),
             },
         );
@@ -166,4 +262,47 @@ pub async fn forget(ids: &[String]) -> Result<u64> {
     }
     pool.close().await;
     Ok(removed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_windows_file_uri() {
+        assert_eq!(
+            file_uri_to_path("file:///c%3A/Users/me/project"),
+            "c:/Users/me/project"
+        );
+    }
+
+    #[test]
+    fn keeps_posix_file_uri() {
+        assert_eq!(file_uri_to_path("file:///home/me/project"), "/home/me/project");
+    }
+
+    #[test]
+    fn code_workspace_file_is_its_own_label() {
+        let path =
+            r"c:/Users/me/AppData/Roaming/Cursor/glassMultiRootWorkspaces/shankblock-6.code-workspace";
+        assert_eq!(workspace_from_config(path), path);
+    }
+
+    #[test]
+    fn missing_config_file_degrades_to_empty() {
+        assert_eq!(workspace_from_config(r"c:/nope/workspace.json"), "");
+    }
+
+    #[test]
+    fn single_folder_uri_wins() {
+        let parsed: WorkspaceIdentifier =
+            serde_json::from_str(r#"{"id":"x","uri":{"fsPath":"h:\\openblock"}}"#).unwrap();
+        assert_eq!(parsed.folder(), r"h:\openblock");
+    }
+
+    #[test]
+    fn empty_window_has_no_folder() {
+        let parsed: WorkspaceIdentifier = serde_json::from_str(r#"{"id":"empty-window"}"#).unwrap();
+        assert_eq!(parsed.folder(), "");
+    }
 }

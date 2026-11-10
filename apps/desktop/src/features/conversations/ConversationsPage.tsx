@@ -18,7 +18,10 @@ interface Group {
 
 function folderName(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, "");
-  return trimmed.split(/[\\/]/).pop() ?? "";
+  const last = trimmed.split(/[\\/]/).pop() ?? "";
+  // Multi-root windows are labelled by their `.code-workspace` file; Cursor
+  // shows that name without the extension.
+  return last.replace(/\.code-workspace$/i, "");
 }
 
 function labelOf(item: ConversationSummary): string {
