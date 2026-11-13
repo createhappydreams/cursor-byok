@@ -44,10 +44,6 @@ impl PruneReport {
     }
 }
 
-/// A vacuum rewrites the whole database, so only pay for it when the freed
-/// pages are worth the I/O.
-const VACUUM_THRESHOLD_BYTES: u64 = 128 * 1024 * 1024;
-
 /// Conversations deleted per transaction. Two keeps a batch well under a second
 /// even when each one owns thousands of messages and checkpoints.
 const CONVERSATION_BATCH: usize = 2;
@@ -138,13 +134,11 @@ impl Store {
             .await?;
         report.reclaimed_bytes = (page_size.max(0) * freelist.max(0)) as u64;
 
-        if report.reclaimed_bytes >= VACUUM_THRESHOLD_BYTES {
-            let _write = self.writes.lock().await;
-            sqlx::query("VACUUM").execute(&self.pool).await?;
-            report.vacuumed = true;
-        }
-
-        // Keep the WAL from staying fat after a large sweep.
+        // Never VACUUM here. It rewrites the whole file while holding the write
+        // lock, which on a gigabyte-sized database stalls every write for
+        // minutes right after startup — adding a model in the console simply
+        // hangs with no error. Freed pages are left for a manual maintenance
+        // window; the sweep only trims the WAL, which is cheap.
         let _write = self.writes.lock().await;
         if let Err(error) = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
             .execute(&self.pool)
