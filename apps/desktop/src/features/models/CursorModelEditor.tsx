@@ -51,12 +51,14 @@ export const emptyCursorModelDraft = (): CursorModelDraft => ({
   anthropicExtraParamsText: "{}",
 });
 
-export function CursorModelEditor({ draft, modelOptions, discovering, onChange, onDiscover }: {
+export function CursorModelEditor({ draft, modelOptions, discovering, onChange, onDiscover, storedApiKeyHint }: {
   draft: CursorModelDraft;
   modelOptions: string[];
   discovering: boolean;
   onChange: (draft: CursorModelDraft) => void;
   onDiscover: () => Promise<boolean>;
+  /** 已保存密钥的掩码；接口不回传明文，留空即表示沿用此密钥。 */
+  storedApiKeyHint?: string;
 }) {
   const modelCombobox = useRef<ComboboxHandle>(null);
   const setModel = (patch: Partial<ModelInput>) => onChange({ ...draft, model: { ...draft.model, ...patch } });
@@ -85,7 +87,8 @@ export function CursorModelEditor({ draft, modelOptions, discovering, onChange, 
     });
   };
   const numberValue = (value: string) => value === "" ? null : Math.trunc(Number(value));
-  const canDiscover = Boolean(draft.model.base_url.trim() && draft.model.api_key.trim());
+  // 编辑已保存的模型时密钥留空，用服务端存的那份去发现模型
+  const canDiscover = Boolean(draft.model.base_url.trim() && (draft.model.api_key.trim() || storedApiKeyHint));
   // 选中预设后，把该服务商已知的模型 id 并入下拉，方便直接选（仍可用「获取模型」发现）
   const presetModelOptions = modelPresets
     .filter((preset) => trimTrailingSlash(presetEndpoint(preset, draft.model.type).baseUrl) === trimTrailingSlash(draft.model.base_url.trim()))
@@ -154,7 +157,7 @@ export function CursorModelEditor({ draft, modelOptions, discovering, onChange, 
         <FormField label={draft.model.use_full_url ? t("完整请求 URL") : t("服务器地址")} hint={draft.model.use_full_url ? t("系统会原样使用此地址，不追加或修改请求路径。") : t("系统会根据请求协议自动追加标准端点路径。")}> <TextInput placeholder={requestUrlPlaceholder} value={draft.model.base_url} onChange={(event) => setModel({ base_url: event.target.value })} /></FormField>
         <Checkbox checked={draft.model.use_full_url} label={t("使用完整请求地址")} onChange={(use_full_url) => setModel({ use_full_url })} />
       </div>
-      <FormField label="API Key" hint={t("访问模型服务所需的密钥。")}> <SecretTextInput placeholder="sk-xxxxxx" autoComplete="off" value={draft.model.api_key} onChange={(event) => setModel({ api_key: event.target.value })} /></FormField>
+      <FormField label="API Key" hint={storedApiKeyHint ? t("已保存 {key}，留空表示继续使用。", { key: storedApiKeyHint }) : t("访问模型服务所需的密钥。")}> <SecretTextInput placeholder={storedApiKeyHint ? t("留空保持不变") : "sk-xxxxxx"} autoComplete="off" value={draft.model.api_key} onChange={(event) => setModel({ api_key: event.target.value })} /></FormField>
 
       <FormField label={t("模型名称")} hint={t("可以直接输入模型标识，也可以读取接口返回的模型列表。")}><Combobox ref={modelCombobox} value={draft.model.model_id} options={combinedOptions} placeholder="gpt-5" append={<Button className={styles.discoverButton} disabled={discovering || !canDiscover} onClick={() => void discoverModels()}>{discovering ? t("获取中…") : t("获取模型")}</Button>} onChange={(model_id) => setModel({ model_id, display_name: draft.model.display_name || model_id })} /></FormField>
       <FormField label={t("显示名称")} hint={t("仅用于界面展示，不会改变发送给模型服务的模型名称。")}> <TextInput placeholder={t("例如：主力模型")} value={draft.model.display_name} onChange={(event) => setModel({ display_name: event.target.value })} /></FormField>

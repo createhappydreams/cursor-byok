@@ -110,7 +110,13 @@ impl Store {
             .model(current_hash)
             .await?
             .ok_or_else(|| Error::RunNotFound(format!("model {current_hash}")))?;
-        let input = normalize_model_input(input)?;
+        // The console never receives the stored credential, so an empty key means
+        // "unchanged" instead of "erase it".
+        let mut patched = input.clone();
+        if patched.api_key.trim().is_empty() {
+            patched.api_key = current.api_key.clone();
+        }
+        let input = normalize_model_input(&patched)?;
         let next_hash = model_hash(&input)?;
         let now = now_ms();
         let _write = self.writes.lock().await;

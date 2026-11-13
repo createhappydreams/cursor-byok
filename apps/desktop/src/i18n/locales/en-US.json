@@ -435,6 +435,7 @@
   "ee6b89a6a740a4c4": "If a port is occupied, a new random port is selected and saved automatically. Restart the app after changing these settings.",
   "eec6bf2dad677b9f": "Granted: {time}",
   "ef5d9908c45f4b88": "Cache read price ($/1M)",
+  "f0cc85933e4b9983": "Saved as {key}. Leave blank to keep using it.",
   "f4694c46b1e19602": "Final request type",
   "f4a0b686421619eb": "Cache write price",
   "f4dcb6a3ceb32247": "Page {page} of {count}",

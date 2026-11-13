@@ -11,7 +11,10 @@ export interface Model {
   type: ModelType;
   base_url: string;
   use_full_url: boolean;
+  /** 接口不再返回明文密钥，编辑时留空表示保持原值。 */
   api_key: string;
+  api_key_masked?: string;
+  has_api_key?: boolean;
   tooltip_data: string;
   model_id: string;
   reasoning_effort: string | null;
@@ -60,6 +63,8 @@ export interface ModelDiscoveryInput {
   type: ModelType;
   base_url: string;
   api_key: string;
+  /** 编辑已有模型时传 hash，服务端用已保存的密钥发现模型。 */
+  model_hash?: string;
   custom_headers_enabled: boolean;
   custom_headers: Record<string, string>;
 }
@@ -514,7 +519,10 @@ export const api = {
   },
   dismissAd: (id: string, reason: string) => request<void>(`/promotions/${encodeURIComponent(id)}/dismissals`, { method: "POST", body: JSON.stringify({ reason }) }),
   models: () => request<Model[]>("/models"),
-  createModels: (models: ModelInput[]) => request<Model[]>("/models", { method: "POST", body: JSON.stringify({ models }) }),
+  createModels: (models: ModelInput[], copyApiKeyFrom?: string) => request<Model[]>(
+    copyApiKeyFrom ? `/models?copy_api_key_from=${encodeURIComponent(copyApiKeyFrom)}` : "/models",
+    { method: "POST", body: JSON.stringify({ models }) },
+  ),
   reorderModels: (modelHashes: string[]) => request<Model[]>("/models/order", { method: "PUT", body: JSON.stringify({ model_hashes: modelHashes }) }),
   discoverModels: (input: ModelDiscoveryInput) => request<{ models: string[] }>("/models/discover", { method: "POST", body: JSON.stringify(input) }),
   previewV0049Models: () => request<LegacyModelImportPreview>("/models/import-v0049"),

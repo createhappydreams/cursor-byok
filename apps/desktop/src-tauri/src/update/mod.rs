@@ -24,7 +24,7 @@ mod replacement;
 
 #[cfg(target_os = "windows")]
 const PORTABLE_UPDATE_ENDPOINT: &str =
-    "https://github.com/leookun/cursor-byok/releases/latest/download/portable-latest.json";
+    "https://github.com/createhappydreams/cursor-byok/releases/latest/download/portable-latest.json";
 #[cfg(any(target_os = "windows", test))]
 const WINDOWS_PAYLOAD_NAME: &str = "cursor-byok-desktop.exe";
 
@@ -144,10 +144,22 @@ async fn portable_update(app: &AppHandle) -> Result<Option<tauri_plugin_updater:
         .map_err(|error| format!("failed to configure the updater: {error}"))?
         .build()
         .map_err(|error| format!("failed to initialize the updater: {error}"))?;
-    updater
-        .check()
-        .await
-        .map_err(|error| format!("failed to check for updates: {error}"))
+    match updater.check().await {
+        Ok(update) => Ok(update),
+        // A fork that never published a portable manifest returns 404 here. That
+        // is "no update available", not an error worth showing on every launch.
+        Err(error) if is_missing_manifest(&error) => {
+            eprintln!("portable update manifest is not published yet: {error}");
+            Ok(None)
+        }
+        Err(error) => Err(format!("failed to check for updates: {error}")),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_missing_manifest(error: &tauri_plugin_updater::Error) -> bool {
+    let text = error.to_string().to_ascii_lowercase();
+    text.contains("404") || text.contains("not found") || text.contains("could not fetch")
 }
 
 #[cfg(target_os = "windows")]

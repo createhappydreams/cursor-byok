@@ -13,6 +13,7 @@ use axum::{
     body::{to_bytes, Body},
     extract::State,
     http::{header, header::CONTENT_TYPE, HeaderValue, Method, Request, Response, StatusCode},
+    middleware::Next,
     routing::{any, get, post, put},
     Router,
 };
@@ -248,6 +249,54 @@ pub fn api_router(service: ControlService) -> Router {
         )
         .with_state(service)
         .layer(desktop_cors())
+        // Outermost, so even a preflight has to prove it addressed the loopback
+        // interface by name. CORS alone cannot stop DNS rebinding: once a hostile
+        // domain resolves to 127.0.0.1 the browser treats the call as same-origin
+        // and never asks for permission.
+        .layer(axum::middleware::from_fn(require_loopback_host))
+}
+
+/// Rejects admin calls whose `Host` header is not a loopback name.
+///
+/// Without this, `http://attacker.example` can be re-pointed at 127.0.0.1 and
+/// read `/__byok-api__/api/models`, which carries provider credentials.
+async fn require_loopback_host(request: Request<Body>, next: Next) -> Response<Body> {
+    if request.uri().path().starts_with("/__byok-api__") && !loopback_host(request.headers()) {
+        tracing::warn!(
+            host = ?request.headers().get(header::HOST),
+            path = %request.uri().path(),
+            "rejected admin request with a non-loopback Host header"
+        );
+        return Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .header(CONTENT_TYPE, "text/plain; charset=utf-8")
+            .body(Body::from(
+                "the local console is only reachable through a loopback address",
+            ))
+            .expect("static forbidden response");
+    }
+    next.run(request).await
+}
+
+fn loopback_host(headers: &axum::http::HeaderMap) -> bool {
+    let Some(raw) = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    // Parsing through `Url` copes with the optional port and with `[::1]:57058`.
+    let Ok(url) = Url::parse(&format!("http://{raw}/")) else {
+        return false;
+    };
+    match url.host() {
+        Some(Host::Domain(host)) => {
+            host.eq_ignore_ascii_case("localhost") || host.eq_ignore_ascii_case("tauri.localhost")
+        }
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
 }
 
 fn desktop_cors() -> CorsLayer {
@@ -291,5 +340,32 @@ fn local_origin(origin: &HeaderValue) -> bool {
             address.is_loopback() || address.is_unique_local() || address.is_unicast_link_local()
         }
         None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::loopback_host;
+    use axum::http::{header, HeaderMap, HeaderValue};
+
+    fn with_host(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_str(value).expect("host"));
+        headers
+    }
+
+    #[test]
+    fn loopback_hosts_pass() {
+        for host in ["127.0.0.1:57058", "localhost:57058", "[::1]:57058", "127.0.0.1"] {
+            assert!(loopback_host(&with_host(host)), "{host} should be allowed");
+        }
+    }
+
+    #[test]
+    fn rebinding_hosts_are_rejected() {
+        for host in ["evil.example.com", "evil.example.com:57058", "10.0.0.5:57058"] {
+            assert!(!loopback_host(&with_host(host)), "{host} should be rejected");
+        }
+        assert!(!loopback_host(&HeaderMap::new()), "missing Host must be rejected");
     }
 }

@@ -435,6 +435,7 @@
   "ee6b89a6a740a4c4": "Se uma porta estiver ocupada, uma nova porta aleatória será selecionada e salva automaticamente. Reinicie o aplicativo após alterar essas configurações.",
   "eec6bf2dad677b9f": "Concedido em: {time}",
   "ef5d9908c45f4b88": "Preço de leitura de cache ($/1M)",
+  "f0cc85933e4b9983": "Salvo como {key}. Deixe em branco para continuar usando.",
   "f4694c46b1e19602": "Tipo final de requisição",
   "f4a0b686421619eb": "Preço de gravação em cache",
   "f4dcb6a3ceb32247": "Página {page} de {count}",

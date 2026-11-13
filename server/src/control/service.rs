@@ -84,6 +84,10 @@ pub struct ModelDiscoveryInput {
     pub model_type: ModelType,
     pub base_url: String,
     pub api_key: String,
+    /// Lets the console discover models with the stored credential instead of the
+    /// plaintext key, which it never receives.
+    #[serde(default)]
+    pub model_hash: Option<String>,
     #[serde(default)]
     pub custom_headers_enabled: bool,
     #[serde(default = "empty_json_object")]
@@ -549,6 +553,19 @@ impl ControlService {
     pub async fn discover_models(&self, input: &ModelDiscoveryInput) -> Result<DiscoveredModels> {
         let client = self.clients.default_client().await?;
         let base_url = crate::model::normalize_request_url(&input.base_url)?;
+        let api_key = if input.api_key.trim().is_empty() {
+            match input.model_hash.as_deref() {
+                Some(hash) => self
+                    .store
+                    .model(hash)
+                    .await?
+                    .map(|model| model.api_key)
+                    .unwrap_or_default(),
+                None => String::new(),
+            }
+        } else {
+            input.api_key.clone()
+        };
         discover_models_from_endpoint(
             &client,
             match input.model_type {
@@ -556,7 +573,7 @@ impl ControlService {
                 ModelType::Anthropic => ProviderType::Anthropic,
             },
             &base_url,
-            &input.api_key,
+            &api_key,
             if input.custom_headers_enabled {
                 &input.custom_headers
             } else {

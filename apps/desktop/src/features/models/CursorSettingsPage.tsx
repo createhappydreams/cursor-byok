@@ -97,6 +97,7 @@ export function CursorSettingsPage() {
         type: draft.model.type,
         base_url: draft.model.base_url.trim(),
         api_key: draft.model.api_key.trim(),
+        model_hash: editing?.model_hash,
         custom_headers_enabled: draft.model.custom_headers_enabled,
         custom_headers,
       });
@@ -111,7 +112,13 @@ export function CursorSettingsPage() {
   };
   const persist = async (): Promise<Model | null> => {
     if (!draft) return null;
-    const input = draftInput(draft);
+    // 接口不回传明文密钥：只有服务商没变时才允许「留空沿用已保存的密钥」，
+    // 换了地址或协议就必须重新填写，避免把上一家的密钥发给新的服务商。
+    const sameProvider = editing !== null
+      && Boolean(editing.has_api_key)
+      && editing.type === draft.model.type
+      && editing.base_url.trim() === draft.model.base_url.trim();
+    const input = draftInput(draft, sameProvider);
     if (editing) return appStore.updateCursorModel(editing.model_hash, input);
     return (await appStore.createModels([input]))?.[0] ?? null;
   };
@@ -216,7 +223,7 @@ export function CursorSettingsPage() {
       ...modelInput(model),
       sort_order: models.length + 1,
       display_name: displayName,
-    }]);
+    }], model.model_hash);
     if (created) message(t("模型已复制"));
   };
   const openGroupSettings = (group: CursorModelGroup) => {
@@ -340,7 +347,7 @@ export function CursorSettingsPage() {
     </ConfirmDialog>
     <Modal fullHeight open={draft !== null} title={editing ? t("编辑模型") : t("添加模型")} banner={draft && (editorTesting || editorTestState) ? <CursorModelTestResult state={editorTestState} testing={editorTesting} /> : undefined} busy={cursorBusy || savingAndTesting} onClose={() => { if (editing && editorTesting) void cancelModelTest(editing.model_hash); setDraft(null); setEditing(null); }} onSubmit={() => void save()} submitLabel={t("保存")} secondaryAction={<button type="button" className={controls.secondary} disabled={cursorBusy || savingAndTesting} onClick={() => void (editorTesting && editing ? cancelModelTest(editing.model_hash) : saveAndTest())}>{savingAndTesting ? t("处理中…") : editorTesting ? t("取消测试") : t("保存并测试")}</button>}>
       {draft && <>
-        <CursorModelEditor draft={draft} modelOptions={modelOptions} discovering={discovering} onChange={setDraft} onDiscover={discover} />
+        <CursorModelEditor draft={draft} modelOptions={modelOptions} discovering={discovering} onChange={setDraft} onDiscover={discover} storedApiKeyHint={editing && editing.has_api_key && editing.type === draft.model.type && editing.base_url.trim() === draft.model.base_url.trim() ? editing.api_key_masked ?? "" : ""} />
       </>}
     </Modal>
     <ConfirmDialog open={caCommand !== null} title={t("安装本地 CA")} cancelLabel={t("关闭")} confirmLabel={t("打开终端")} onCancel={() => setCaCommand(null)} onConfirm={openCaTerminal}>
@@ -375,7 +382,7 @@ function sharedValue(values: string[]): string | null {
   return rest.every((value) => value === first) ? first : null;
 }
 
-function draftInput(draft: CursorModelDraft): ModelInput {
+function draftInput(draft: CursorModelDraft, keepStoredKey = false): ModelInput {
   const model = {
     ...draft.model,
     display_name: draft.model.display_name.trim(),
@@ -387,7 +394,8 @@ function draftInput(draft: CursorModelDraft): ModelInput {
     custom_headers: parseHeaders(draft.customHeadersText),
     anthropic_extra_params: parseObject(draft.anthropicExtraParamsText, t("Anthropic 额外参数")),
   };
-  if (!model.display_name || !model.base_url || !model.api_key || !model.tooltip_data || !model.model_id) throw new Error(t("服务器地址或完整请求 URL、API Key、模型名称、显示名称和备注不能为空"));
+  const missingKey = !model.api_key && !(keepStoredKey && Boolean(model.base_url));
+  if (!model.display_name || !model.base_url || missingKey || !model.tooltip_data || !model.model_id) throw new Error(t("服务器地址或完整请求 URL、API Key、模型名称、显示名称和备注不能为空"));
   for (const [label, value] of [[t("上下文窗口 Token"), model.context_window_tokens], [t("最大输出 Token"), model.type === "openai" ? model.max_completion_tokens : model.anthropic_max_tokens], [t("思考预算 Token"), model.thinking_budget_tokens]] as const) {
     if (value !== null && (!Number.isSafeInteger(value) || value <= 0)) throw new Error(t("{label} 必须是大于 0 的整数", { label }));
   }

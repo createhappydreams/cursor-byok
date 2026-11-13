@@ -31,6 +31,41 @@ Artifact · 产物：`target/release/cursor-byok-desktop.exe`（约 68 MB）
 > (that additionally requires a Tauri signing key).
 > `--no-bundle` 只产出可执行文件；若需要 NSIS 安装包则去掉该参数（此时还需 Tauri 签名密钥）。
 
+### Distributing the binary · 对外分发
+
+Rust embeds the absolute source path of every crate into panic messages, so a
+default build carries the builder's Windows user name
+(`C:\Users\<name>\.cargo\registry\src\...`). Two steps remove it · Rust 会把每个
+crate 的绝对源码路径写进 panic 信息，默认构建产物里带着构建者的 Windows 用户名，
+两步清理：
+
+```bash
+# 1) rustc 自身的路径（Git Bash）
+export RUSTFLAGS="--remap-path-prefix=$USERPROFILE=/build"
+
+# 2) C 依赖用 __FILE__ 写死的路径（aws-lc / onig / mimalloc）
+python scripts/strip-builder-paths.py target/release/cursor-byok-desktop.exe --name "$USERNAME"
+```
+
+Step 2 is an equal-length byte replacement inside string constants, so the PE
+layout does not move; it is only cosmetic panic text. After it,
+`grep -c "$USERNAME" cursor-byok-desktop.exe` must return 0.
+第 2 步是定长的字符串常量替换，不改变 PE 结构，只影响诊断文本；执行后产物里不应再出现用户名。
+
+`RUSTFLAGS` invalidates the cargo cache, so the first build with it recompiles
+every dependency · 加了 `RUSTFLAGS` 会使 cargo 缓存失效，首次会重编全部依赖。
+If that build appears to hang with idle `rustc`/`cl.exe` processes, cap the
+parallelism (`CARGO_BUILD_JOBS=4`) — the jobserver deadlocks on some Windows
+setups when the job count is high.
+若构建卡住但 `rustc`/`cl.exe` 的 CPU 为 0，用 `CARGO_BUILD_JOBS=4` 限制并行度，
+某些 Windows 环境下高并行会触发 jobserver 死锁。
+
+Also ship the `.exe` alone — never the whole `target/release` folder (it contains
+`.pdb` debug symbols with full paths) and never `~/.cursor-byok-v3` (it stores
+provider API keys, the local CA private key and OAuth tokens in plaintext).
+只分发 `.exe` 单文件：不要带上整个 `target/release`（含带完整路径的 `.pdb` 调试符号），
+也不要分发 `~/.cursor-byok-v3`（里面有明文的模型密钥、本地 CA 私钥和 OAuth token）。
+
 ## Two pitfalls · 两个坑
 
 ### 1. Do not use `cargo build --release` · 不要直接用 cargo 编译

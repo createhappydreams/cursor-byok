@@ -178,10 +178,10 @@ export const appStore = {
     catch (cause) { update({ error: cause instanceof Error ? cause.message : String(cause) }); }
     finally { update({ cursorBusy: false }); }
   },
-  async createModels(models: ModelInput[]) {
+  async createModels(models: ModelInput[], copyApiKeyFrom?: string) {
     update({ cursorBusy: true, error: null });
     try {
-      const created = await api.createModels(models);
+      const created = await api.createModels(models, copyApiKeyFrom);
       await appStore.refresh();
       return created;
     } catch (cause) {
