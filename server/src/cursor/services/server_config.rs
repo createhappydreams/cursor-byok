@@ -71,14 +71,31 @@ fn server_config() -> ServerConfigResponse {
         is_dev_do_not_use_for_secret_things_because_can_be_spoofed_by_users:
             DEV_USER_FLAG_SPOOFABLE_BY_DESIGN,
         config_version: "cursor_byok_local_agent_v1".into(),
-        http2_config: http2_config(std::env::var(HTTP2_CONFIG_ENV).ok().as_deref()),
+        http2_config: http2_config(),
         cli_sandbox_default_enabled: Some(true),
     }
 }
 
+pub(crate) fn http2_config() -> i32 {
+    parse_http2_config(std::env::var(HTTP2_CONFIG_ENV).ok().as_deref())
+}
+
+/// Whether the agent transports may negotiate HTTP/2.
+///
+/// Cursor's own `cursor.general.disableHttp2` setting has to agree with this: the
+/// workspace applies it locally when the proxy is enabled, and a stale `true` there
+/// overrides whatever this response asks for. Keeping both sides on one switch is
+/// what makes `CURSOR_BYOK_HTTP2=off` a complete revert.
+pub(crate) fn http2_allowed() -> bool {
+    matches!(
+        http2_config(),
+        HTTP2_CONFIG_UNSPECIFIED | HTTP2_CONFIG_FORCE_ALL_ENABLED | HTTP2_CONFIG_FORCE_BIDI_ENABLED
+    )
+}
+
 /// Unknown values fall back to the default instead of failing the request: a typo in
 /// the override must not be able to break the agent transport at startup.
-fn http2_config(override_value: Option<&str>) -> i32 {
+fn parse_http2_config(override_value: Option<&str>) -> i32 {
     match override_value.map(|value| value.trim().to_ascii_lowercase()) {
         Some(value) => match value.as_str() {
             "1" | "off" | "disabled" => HTTP2_CONFIG_FORCE_ALL_DISABLED,
@@ -107,26 +124,26 @@ mod tests {
     fn leaves_transport_policy_to_the_client_by_default() {
         let config = server_config();
         assert_eq!(config.cli_sandbox_default_enabled, Some(true));
-        assert_eq!(http2_config(None), HTTP2_CONFIG_UNSPECIFIED);
+        assert_eq!(parse_http2_config(None), HTTP2_CONFIG_UNSPECIFIED);
     }
 
     #[test]
     fn maps_every_documented_override() {
-        assert_eq!(http2_config(Some("default")), HTTP2_CONFIG_UNSPECIFIED);
-        assert_eq!(http2_config(Some("0")), HTTP2_CONFIG_UNSPECIFIED);
-        assert_eq!(http2_config(Some(" off ")), HTTP2_CONFIG_FORCE_ALL_DISABLED);
-        assert_eq!(http2_config(Some("1")), HTTP2_CONFIG_FORCE_ALL_DISABLED);
-        assert_eq!(http2_config(Some("ON")), HTTP2_CONFIG_FORCE_ALL_ENABLED);
-        assert_eq!(http2_config(Some("2")), HTTP2_CONFIG_FORCE_ALL_ENABLED);
-        assert_eq!(http2_config(Some("3")), HTTP2_CONFIG_FORCE_BIDI_DISABLED);
-        assert_eq!(http2_config(Some("bidi_on")), HTTP2_CONFIG_FORCE_BIDI_ENABLED);
-        assert_eq!(http2_config(Some("4")), HTTP2_CONFIG_FORCE_BIDI_ENABLED);
+        assert_eq!(parse_http2_config(Some("default")), HTTP2_CONFIG_UNSPECIFIED);
+        assert_eq!(parse_http2_config(Some("0")), HTTP2_CONFIG_UNSPECIFIED);
+        assert_eq!(parse_http2_config(Some(" off ")), HTTP2_CONFIG_FORCE_ALL_DISABLED);
+        assert_eq!(parse_http2_config(Some("1")), HTTP2_CONFIG_FORCE_ALL_DISABLED);
+        assert_eq!(parse_http2_config(Some("ON")), HTTP2_CONFIG_FORCE_ALL_ENABLED);
+        assert_eq!(parse_http2_config(Some("2")), HTTP2_CONFIG_FORCE_ALL_ENABLED);
+        assert_eq!(parse_http2_config(Some("3")), HTTP2_CONFIG_FORCE_BIDI_DISABLED);
+        assert_eq!(parse_http2_config(Some("bidi_on")), HTTP2_CONFIG_FORCE_BIDI_ENABLED);
+        assert_eq!(parse_http2_config(Some("4")), HTTP2_CONFIG_FORCE_BIDI_ENABLED);
     }
 
     #[test]
     fn unknown_override_falls_back_to_the_client_default() {
-        assert_eq!(http2_config(Some("http3")), HTTP2_CONFIG_UNSPECIFIED);
-        assert_eq!(http2_config(Some("")), HTTP2_CONFIG_UNSPECIFIED);
+        assert_eq!(parse_http2_config(Some("http3")), HTTP2_CONFIG_UNSPECIFIED);
+        assert_eq!(parse_http2_config(Some("")), HTTP2_CONFIG_UNSPECIFIED);
     }
 
     #[test]
