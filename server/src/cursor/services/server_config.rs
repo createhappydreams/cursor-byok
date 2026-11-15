@@ -95,6 +95,13 @@ pub(crate) fn http2_allowed() -> bool {
 
 /// Unknown values fall back to the default instead of failing the request: a typo in
 /// the override must not be able to break the agent transport at startup.
+///
+/// The default is HTTP/1.1 on purpose. The local MITM proxy can only inspect
+/// HTTP/1.1 requests to decide whether a path belongs to the BYOK backend or to the
+/// Cursor upstream; an HTTP/2 connection is tunnelled opaquely, so agent runs would
+/// go straight to Cursor, which then rejects the BYOK model hash with
+/// `ERROR_BAD_MODEL_NAME`. Only opt back in explicitly with
+/// `CURSOR_BYOK_HTTP2=default|on|bidi_on`.
 fn parse_http2_config(override_value: Option<&str>) -> i32 {
     match override_value.map(|value| value.trim().to_ascii_lowercase()) {
         Some(value) => match value.as_str() {
@@ -107,12 +114,12 @@ fn parse_http2_config(override_value: Option<&str>) -> i32 {
                 tracing::warn!(
                     value = other,
                     env = HTTP2_CONFIG_ENV,
-                    "unrecognised http2 override, using the client default"
+                    "unrecognised http2 override, forcing http1"
                 );
-                HTTP2_CONFIG_UNSPECIFIED
+                HTTP2_CONFIG_FORCE_ALL_DISABLED
             }
         },
-        None => HTTP2_CONFIG_UNSPECIFIED,
+        None => HTTP2_CONFIG_FORCE_ALL_DISABLED,
     }
 }
 
@@ -121,10 +128,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn leaves_transport_policy_to_the_client_by_default() {
+    fn forces_http1_by_default() {
         let config = server_config();
         assert_eq!(config.cli_sandbox_default_enabled, Some(true));
-        assert_eq!(parse_http2_config(None), HTTP2_CONFIG_UNSPECIFIED);
+        assert_eq!(parse_http2_config(None), HTTP2_CONFIG_FORCE_ALL_DISABLED);
     }
 
     #[test]
@@ -141,8 +148,8 @@ mod tests {
     }
 
     #[test]
-    fn unknown_override_falls_back_to_the_client_default() {
-        assert_eq!(parse_http2_config(Some("http3")), HTTP2_CONFIG_UNSPECIFIED);
+    fn unknown_override_falls_back_to_http1() {
+        assert_eq!(parse_http2_config(Some("http3")), HTTP2_CONFIG_FORCE_ALL_DISABLED);
         assert_eq!(parse_http2_config(Some("")), HTTP2_CONFIG_UNSPECIFIED);
     }
 
