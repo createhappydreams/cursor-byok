@@ -23,6 +23,29 @@ type BlobSetSender = oneshot::Sender<Result<()>>;
 const SET_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const GET_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
+/// Cursor drops a blob SET with `error="Canceled"` whenever its bidi stream
+/// hiccups mid-write. Blobs are immutable and content-addressed, so re-sending
+/// one is always safe; each retry uses a fresh KV id, so a late cancellation of
+/// the previous id cannot land on the new request. Backoff is deliberately short:
+/// the client only needs a few hundred milliseconds to rebuild its stream, and the
+/// run is blocked while we wait.
+const SET_RETRY_BACKOFF_MS: [u64; 3] = [200, 600, 1_500];
+
+/// Whether a failed blob SET is worth re-sending.
+///
+/// Only an explicit rejection from Cursor qualifies (`KV SET <blob>: <reason>`).
+/// A disconnect is not retryable: `disconnect_token` is cancelled for the rest of
+/// the run, so the retry would abort instantly on the same dead token.
+fn is_retryable_set_failure(error: &Error) -> bool {
+    match error {
+        Error::Protocol(message) => {
+            message.starts_with("KV SET ") && !message.contains("timed out")
+        }
+        Error::Cancelled | Error::RunNotFound(_) => false,
+        _ => false,
+    }
+}
+
 #[derive(Clone)]
 pub struct BlobSynchronizer {
     inner: Arc<Inner>,
@@ -99,6 +122,31 @@ impl BlobSynchronizer {
         if self.inner.acked_blobs.lock().await.contains(blob_id) {
             return Ok(());
         }
+        let mut attempt = 0usize;
+        loop {
+            match self.set_once(blob_id, data).await {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    let backoff_ms = match SET_RETRY_BACKOFF_MS.get(attempt) {
+                        Some(&backoff) if is_retryable_set_failure(&error) => backoff,
+                        _ => return Err(error),
+                    };
+                    attempt += 1;
+                    tracing::warn!(
+                        request_id = self.request_id(),
+                        blob_id = blob_id.to_base64(),
+                        attempt,
+                        backoff_ms,
+                        error = %error,
+                        "Blob SET rejected by Cursor, retrying on a fresh kv id"
+                    );
+                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                }
+            }
+        }
+    }
+
+    async fn set_once(&self, blob_id: &BlobId, data: &[u8]) -> Result<()> {
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
         self.inner.set_requests.lock().await.insert(
@@ -315,6 +363,29 @@ impl BlobSynchronizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retries_explicit_rejections_but_not_dead_transports() {
+        assert!(is_retryable_set_failure(&Error::Protocol(
+            "KV SET 1jP4me8f=: Canceled".into()
+        )));
+        // A disconnect kills the run; the token never resets, so retrying is a spin.
+        assert!(!is_retryable_set_failure(&Error::Cancelled));
+        assert!(!is_retryable_set_failure(&Error::RunNotFound("run".into())));
+        // Timeouts already burned the full window and GET failures are unrelated.
+        assert!(!is_retryable_set_failure(&Error::Protocol(
+            "KV SET timed out: 1jP4me8f=".into()
+        )));
+        assert!(!is_retryable_set_failure(&Error::Protocol(
+            "KV GET 1jP4me8f=: Canceled".into()
+        )));
+    }
+
+    #[test]
+    fn retry_budget_is_bounded() {
+        assert_eq!(SET_RETRY_BACKOFF_MS.len(), 3);
+        assert_eq!(SET_RETRY_BACKOFF_MS[0], 200);
+    }
 
     #[test]
     fn set_timeout_allows_slow_cursor_acknowledgements() {
