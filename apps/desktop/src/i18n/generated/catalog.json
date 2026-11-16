@@ -532,7 +532,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 217,
+          "line": 322,
           "column": 12
         }
       ]
@@ -781,7 +781,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 287,
+          "line": 452,
           "column": 57
         }
       ]
@@ -889,7 +889,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 52,
+          "line": 54,
           "column": 75
         }
       ]
@@ -976,7 +976,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 298,
+          "line": 463,
           "column": 63
         }
       ]
@@ -1012,7 +1012,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 57,
+          "line": 59,
           "column": 57
         }
       ]
@@ -1088,7 +1088,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 175,
+          "line": 251,
           "column": 9
         }
       ]
@@ -1100,8 +1100,13 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 188,
-          "column": 11
+          "line": 263,
+          "column": 20
+        },
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 295,
+          "column": 14
         }
       ]
     },
@@ -1138,7 +1143,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 53,
+          "line": 55,
           "column": 81
         }
       ]
@@ -1174,7 +1179,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 225,
+          "line": 368,
           "column": 42
         }
       ]
@@ -1675,6 +1680,11 @@
       "placeholders": [],
       "refs": [
         {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 331,
+          "column": 40
+        },
+        {
           "file": "features/plugins/PluginResourcePanels.tsx",
           "line": 307,
           "column": 106
@@ -1705,13 +1715,13 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 136,
-          "column": 36
+          "line": 73,
+          "column": 27
         },
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 189,
-          "column": 44
+          "line": 212,
+          "column": 36
         }
       ]
     },
@@ -1922,7 +1932,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 65,
+          "line": 67,
           "column": 26
         }
       ]
@@ -2000,6 +2010,30 @@
           "file": "features/settings/AppLifecycleSettingsCard.tsx",
           "line": 128,
           "column": 17
+        }
+      ]
+    },
+    "48447b4ee1fe887e": {
+      "source": "将删除选中对话的 BYOK 本地数据，Cursor 侧边栏条目保留。确定继续？",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 287,
+          "column": 9
+        }
+      ]
+    },
+    "4844934db5e295c5": {
+      "source": "彻底删除选中",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 350,
+          "column": 36
         }
       ]
     },
@@ -2193,7 +2227,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 58,
+          "line": 60,
           "column": 38
         }
       ]
@@ -2205,13 +2239,13 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 78,
+          "line": 89,
           "column": 42
         },
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 235,
-          "column": 38
+          "line": 387,
+          "column": 40
         }
       ]
     },
@@ -2239,7 +2273,12 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 196,
+          "line": 265,
+          "column": 20
+        },
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 298,
           "column": 20
         }
       ]
@@ -2268,7 +2307,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 223,
+          "line": 366,
           "column": 41
         }
       ]
@@ -2314,6 +2353,18 @@
           "file": "features/settings/TabSettingsCard.tsx",
           "line": 60,
           "column": 41
+        }
+      ]
+    },
+    "4f29f1032bcba095": {
+      "source": "选中整个项目",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 381,
+          "column": 26
         }
       ]
     },
@@ -2873,7 +2924,7 @@
       "refs": [
         {
           "file": "shared/api.ts",
-          "line": 590,
+          "line": 600,
           "column": 43
         }
       ]
@@ -3036,12 +3087,12 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 54,
+          "line": 56,
           "column": 63
         },
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 224,
+          "line": 367,
           "column": 41
         }
       ]
@@ -3104,7 +3155,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 222,
+          "line": 365,
           "column": 18
         }
       ]
@@ -3143,6 +3194,18 @@
         }
       ]
     },
+    "6ea222cd9ecb4773": {
+      "source": "全选 / 取消全选",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 360,
+          "column": 20
+        }
+      ]
+    },
     "6efa31dee7a053c0": {
       "source": "请求上下文",
       "kind": "text",
@@ -3150,7 +3213,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 56,
+          "line": 58,
           "column": 73
         }
       ]
@@ -3176,7 +3239,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 273,
+          "line": 438,
           "column": 26
         }
       ]
@@ -3229,8 +3292,20 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 259,
+          "line": 424,
           "column": 69
+        }
+      ]
+    },
+    "76e547a8fa546381": {
+      "source": "共",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 288,
+          "column": 39
         }
       ]
     },
@@ -3277,7 +3352,7 @@
       "refs": [
         {
           "file": "shared/api.ts",
-          "line": 585,
+          "line": 595,
           "column": 43
         }
       ]
@@ -3301,7 +3376,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 281,
+          "line": 446,
           "column": 72
         }
       ]
@@ -3397,6 +3472,18 @@
         }
       ]
     },
+    "7ecf1cde648680d2": {
+      "source": "已选",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 334,
+          "column": 14
+        }
+      ]
+    },
     "7ed9f96f513813a4": {
       "source": "外部 API 设置已保存",
       "kind": "text",
@@ -3455,7 +3542,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 135,
+          "line": 211,
           "column": 9
         }
       ]
@@ -3503,7 +3590,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 38,
+          "line": 40,
           "column": 33
         }
       ]
@@ -3666,8 +3753,8 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 191,
-          "column": 81
+          "line": 74,
+          "column": 60
         }
       ]
     },
@@ -3702,7 +3789,12 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 281,
+          "line": 350,
+          "column": 25
+        },
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 446,
           "column": 61
         }
       ]
@@ -4088,6 +4180,18 @@
           "file": "shell/AppLayout.tsx",
           "line": 244,
           "column": 11
+        }
+      ]
+    },
+    "9b8510b476b836d8": {
+      "source": "删本地选中",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 342,
+          "column": 14
         }
       ]
     },
@@ -4613,7 +4717,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 61,
+          "line": 63,
           "column": 60
         }
       ]
@@ -4844,8 +4948,8 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 191,
-          "column": 41
+          "line": 74,
+          "column": 26
         }
       ]
     },
@@ -4868,7 +4972,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 51,
+          "line": 53,
           "column": 55
         }
       ]
@@ -4983,7 +5087,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 59,
+          "line": 61,
           "column": 22
         }
       ]
@@ -4995,7 +5099,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 149,
+          "line": 225,
           "column": 9
         }
       ]
@@ -5060,7 +5164,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 55,
+          "line": 57,
           "column": 63
         }
       ]
@@ -5230,7 +5334,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 257,
+          "line": 422,
           "column": 77
         }
       ]
@@ -5273,6 +5377,23 @@
         }
       ]
     },
+    "c126c103ec2f6a8b": {
+      "source": "条对话",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 288,
+          "column": 63
+        },
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 295,
+          "column": 57
+        }
+      ]
+    },
     "c1e98892a77f7a19": {
       "source": "{count} 条/页",
       "kind": "template",
@@ -5294,7 +5415,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 217,
+          "line": 322,
           "column": 27
         }
       ]
@@ -5323,13 +5444,13 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 136,
-          "column": 72
+          "line": 73,
+          "column": 63
         },
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 189,
-          "column": 86
+          "line": 212,
+          "column": 72
         }
       ]
     },
@@ -5964,6 +6085,18 @@
         }
       ]
     },
+    "dfd45799b993168f": {
+      "source": "将彻底删除选中的对话：BYOK 本地数据 + Cursor 侧全部数据（侧边栏条目、气泡、快照、文件缓存）。请先完全退出 Cursor，否则删除会被写回。确定继续？",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 286,
+          "column": 9
+        }
+      ]
+    },
     "e025f1ff71996425": {
       "source": "已设置",
       "kind": "text",
@@ -6223,6 +6356,18 @@
         }
       ]
     },
+    "e7c0d70b25d76f37": {
+      "source": "条删除失败",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 305,
+          "column": 47
+        }
+      ]
+    },
     "e825a2a42c22380e": {
       "source": "模型类型",
       "kind": "text",
@@ -6271,7 +6416,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 290,
+          "line": 455,
           "column": 26
         }
       ]
@@ -6386,7 +6531,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 124,
+          "line": 200,
           "column": 9
         }
       ]
@@ -6422,7 +6567,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 162,
+          "line": 238,
           "column": 13
         }
       ]
@@ -6505,6 +6650,18 @@
           "file": "features/settings/PricingSettingsCard.tsx",
           "line": 43,
           "column": 72
+        }
+      ]
+    },
+    "f4d4bae588c4c0ff": {
+      "source": "取消全选",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 331,
+          "column": 28
         }
       ]
     },
@@ -6633,8 +6790,8 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 193,
-          "column": 42
+          "line": 75,
+          "column": 27
         }
       ]
     },
@@ -6719,7 +6876,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 306,
+          "line": 471,
           "column": 14
         },
         {
@@ -6838,7 +6995,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 61,
+          "line": 63,
           "column": 27
         }
       ]

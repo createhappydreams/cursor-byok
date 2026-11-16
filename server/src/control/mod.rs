@@ -156,6 +156,10 @@ pub fn api_router(service: ControlService) -> Router {
             "/__byok-api__/api/conversations/{conversation_id}/everywhere",
             axum::routing::delete(conversations::remove_everywhere),
         )
+        .route(
+            "/__byok-api__/api/conversations/purge",
+            axum::routing::post(conversations::remove_selection),
+        )
         .route("/__byok-api__/api/plugins", get(plugins::list))
         .route(
             "/__byok-api__/api/plugins/runtime",

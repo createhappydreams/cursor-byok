@@ -20,6 +20,78 @@
   gap: 10px;
 }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.selectAll {
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.28);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.selectAll:hover:not(:disabled) {
+  border-color: #4082c9;
+  color: #4082c9;
+}
+
+.selectAll:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.selectedCount {
+  font-size: 12px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bulkDelete {
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.28);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bulkDelete:hover:not(:disabled) {
+  border-color: #d4537e;
+  color: #d4537e;
+}
+
+.bulkEverywhere {
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(178, 74, 74, 0.55);
+  background: rgba(178, 74, 74, 0.12);
+  color: #d4537e;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bulkEverywhere:hover:not(:disabled) {
+  background: rgba(178, 74, 74, 0.2);
+}
+
+.bulkDelete:disabled,
+.bulkEverywhere:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .count {
   font-size: 18px;
   font-weight: 500;
@@ -37,12 +109,28 @@
 
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px 64px 140px 250px;
+  grid-template-columns: 18px minmax(0, 1fr) 64px 64px 140px 250px;
   gap: 12px;
   align-items: center;
   padding: 10px 8px;
   border-bottom: 1px solid var(--color-border-tertiary, rgba(128, 128, 128, 0.16));
   font-size: 13px;
+}
+
+.check {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: #4082c9;
+}
+
+.check:disabled {
+  cursor: default;
+}
+
+.itemSelected {
+  background: rgba(64, 130, 201, 0.08);
 }
 
 .head {
@@ -56,12 +144,22 @@
   flex-direction: column;
 }
 
+/* The per-project checkbox sits beside the collapse button, which must stay a
+   button for keyboard and screen-reader users. */
+.groupRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 0 8px 0 2px;
+}
+
 .groupHead {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  margin-top: 4px;
+  flex: 1;
+  min-width: 0;
   padding: 8px;
   border: 0;
   border-radius: 6px;
@@ -111,19 +209,10 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Rows now start with a checkbox; the old guide line ran through that column,
+   so the project grouping cue is the group header instead. */
 .item {
   position: relative;
-  padding-left: 26px;
-}
-
-.item::before {
-  content: "";
-  position: absolute;
-  left: 12px;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: rgba(128, 128, 128, 0.16);
 }
 
 .preview {

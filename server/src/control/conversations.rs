@@ -83,6 +83,80 @@ pub struct EverywhereRemoval {
     pub cursor_error: Option<String>,
 }
 
+/// Batch removal request: the console sends every ticked conversation at once
+/// instead of one request per row, which matters when a project holds hundreds.
+#[derive(serde::Deserialize)]
+pub struct SelectionPurge {
+    pub conversation_ids: Vec<String>,
+    /// Also drop the chats from Cursor's own database.
+    pub cursor: bool,
+}
+
+/// Aggregated outcome of a batch removal.
+#[derive(Serialize, Default)]
+pub struct SelectionRemoval {
+    /// Summed local row counts across every conversation in the batch.
+    pub local: PurgedConversation,
+    /// How many of the selected conversations actually had local rows.
+    pub local_conversations: usize,
+    /// Cursor-side report for the whole batch, one database pass.
+    pub cursor: Option<CursorSideRemoval>,
+    pub cursor_error: Option<String>,
+    /// Conversations that could not be removed locally, with the reason.
+    pub failed: Vec<SelectionFailure>,
+}
+
+#[derive(Serialize)]
+pub struct SelectionFailure {
+    pub conversation_id: String,
+    pub error: String,
+}
+
+/// Removes a whole selection in one request.
+///
+/// Local rows go first and are transactional per conversation, so one failure
+/// (a chat that is still running) does not abort the rest of the batch. The
+/// Cursor side is a single pass over every id: `forget_detailed` opens the
+/// database once and deletes each conversation's rows inside it.
+pub async fn remove_selection(
+    State(service): State<ControlService>,
+    Json(body): Json<SelectionPurge>,
+) -> Result<Json<SelectionRemoval>> {
+    let mut report = SelectionRemoval::default();
+    for conversation_id in &body.conversation_ids {
+        match service.purge_conversation(conversation_id).await {
+            Ok(Some(purged)) => {
+                report.local_conversations += 1;
+                report.local.messages += purged.messages;
+                report.local.checkpoints += purged.checkpoints;
+                report.local.runs += purged.runs;
+                report.local.llm_calls += purged.llm_calls;
+                report.local.blobs += purged.blobs;
+            }
+            Ok(None) => {}
+            Err(error) => report.failed.push(SelectionFailure {
+                conversation_id: conversation_id.clone(),
+                error: error.to_string(),
+            }),
+        }
+    }
+
+    if body.cursor && !body.conversation_ids.is_empty() {
+        match composer_headers::forget_detailed(&body.conversation_ids).await {
+            Ok(cursor) => report.cursor = Some(cursor),
+            Err(error) => {
+                tracing::warn!(%error, "cursor-side batch removal failed; local rows were purged");
+                report.cursor_error = Some(
+                    "Cursor 数据库无法写入；本地数据已删除。请完全退出 Cursor 后重试「清侧边栏」。"
+                        .to_string(),
+                );
+            }
+        }
+    }
+
+    Ok(Json(report))
+}
+
 pub async fn remove_everywhere(
     State(service): State<ControlService>,
     Path(conversation_id): Path<String>,

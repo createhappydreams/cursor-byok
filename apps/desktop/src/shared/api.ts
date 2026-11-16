@@ -530,6 +530,16 @@ export interface EverywhereRemoval {
   cursor_error: string | null;
 }
 
+/** Aggregated result of removing a batch of ticked conversations. */
+export interface SelectionRemoval {
+  local: PurgedConversation;
+  /** How many of the ticked conversations actually had local rows. */
+  local_conversations: number;
+  cursor: CursorSideRemoval | null;
+  cursor_error: string | null;
+  failed: { conversation_id: string; error: string }[];
+}
+
 export const api = {
   ads: (disabledAdIds: Iterable<string>, locale: Locale) => {
     const value = [...disabledAdIds].join(",");
@@ -597,6 +607,11 @@ export const api = {
   deleteConversation: (id: string) => request<PurgedConversation>(`/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
   deleteSidebarEntry: (id: string) => request<CursorSideRemoval>(`/conversations/${encodeURIComponent(id)}/sidebar-entry`, { method: "DELETE" }),
   deleteEverywhere: (id: string) => request<EverywhereRemoval>(`/conversations/${encodeURIComponent(id)}/everywhere`, { method: "DELETE" }),
+  deleteSelection: (ids: string[], cursor: boolean) =>
+    request<SelectionRemoval>("/conversations/purge", {
+      method: "POST",
+      body: JSON.stringify({ conversation_ids: ids, cursor }),
+    }),
   call: (id: string) => request<CallDetail>(`/llm-calls/${encodeURIComponent(id)}`),
   openCallDetails: async (id: string) => {
     const url = new URL(window.location.href);
