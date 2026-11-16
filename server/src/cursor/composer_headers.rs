@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::Row;
 
@@ -222,14 +222,107 @@ pub async fn load() -> HashMap<String, CursorComposer> {
     out
 }
 
-/// Drops the Cursor-side rows for the given conversations so they disappear
-/// from the sidebar instead of lingering as unopenable entries.
+/// Per-family row counts for one conversation removed from Cursor's database.
 ///
-/// Cursor must be closed: it holds the database open and will overwrite the
-/// change from memory otherwise. Returns the number of rows removed.
-pub async fn forget(ids: &[String]) -> Result<u64> {
+/// `remaining` is re-counted after the deletes: when Cursor was closed, it
+/// reads 0; a non-zero value means Cursor rewrote the rows from memory (it
+/// was still running) and the chat is not really gone yet.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct CursorSideRemoval {
+    /// Rows removed from the `composerHeaders` table (the sidebar list).
+    pub composer_headers: u64,
+    /// Chat bubbles, including their stream/tool-call shards.
+    pub bubbles: u64,
+    /// Conversation checkpoints (Cursor's own restore points).
+    pub checkpoints: u64,
+    /// `composerConvHeaders:*` rows, the history-list entries of newer builds.
+    pub conversation_headers: u64,
+    /// `composerData`, transcript tail and writer diagnostics.
+    pub conversation_data: u64,
+    /// `ofsContent:*` cached file contents the conversation referenced.
+    pub file_caches: u64,
+    /// `messageRequestContext:*` rows, when present.
+    pub request_contexts: u64,
+    /// ItemTable editor-pane state kept for this conversation.
+    pub ui_state: u64,
+    /// Total rows removed across every family.
+    pub removed: u64,
+    /// Whether any row matched at all.
+    pub found: bool,
+    /// Rows still matching after the deletes; 0 means really gone.
+    pub remaining: u64,
+}
+
+impl CursorSideRemoval {
+    fn is_found(&self) -> bool {
+        self.removed > 0
+    }
+}
+
+/// Every `cursorDiskKV` key family a conversation owns.
+///
+/// Surveyed against Cursor 3.30: `bubbleId` carries the chat bubbles and
+/// their `/s:` stream shards plus `/t:` tool-call shards, `checkpointId` the
+/// restore points, `composerConvHeaders` the sidebar history entries,
+/// `composerData` the conversation document itself, `composerRootWriterDiagnostic`
+/// and `composerTranscriptHeightTail` writer state, `ofsContent` cached copies
+/// of files the agent read, and `messageRequestContext` request metadata.
+fn cursor_disk_patterns(id: &str) -> Vec<String> {
+    vec![
+        format!("bubbleId:{id}:%"),
+        format!("checkpointId:{id}:%"),
+        format!("composerConvHeaders:{id}:%"),
+        format!("composerData:{id}"),
+        format!("composerRootWriterDiagnostic:{id}"),
+        format!("composerTranscriptHeightTail:{id}"),
+        format!("ofsContent:{id}:%"),
+        format!("messageRequestContext:{id}:%"),
+    ]
+}
+
+/// `ItemTable` keys newer builds keep per conversation (editor pane state).
+fn item_table_keys(id: &str) -> [String; 3] {
+    [
+        format!("cursor/glass.editorPanelFullscreen/{id}"),
+        format!("glass.agentConversationPanes.{id}"),
+        format!("glass/cursor.editorPanelVisibility.agent/{id}"),
+    ]
+}
+
+async fn count_rows_like(pool: &sqlx::SqlitePool, patterns: &[String]) -> Result<u64> {
+    let mut total = 0u64;
+    for pattern in patterns {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cursorDiskKV WHERE key LIKE ?")
+            .bind(pattern)
+            .fetch_one(pool)
+            .await?;
+        total += count.max(0) as u64;
+    }
+    Ok(total)
+}
+
+async fn count_item_table_keys(pool: &sqlx::SqlitePool, keys: &[String]) -> Result<u64> {
+    let mut total = 0u64;
+    for key in keys {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ItemTable WHERE [key] = ?")
+            .bind(key)
+            .fetch_one(pool)
+            .await?;
+        total += count.max(0) as u64;
+    }
+    Ok(total)
+}
+
+/// Drops every Cursor-side row for the given conversations so they vanish
+/// from the sidebar, the history list and the on-disk caches.
+///
+/// Cursor must be closed: it holds the database open and rewrites deleted
+/// rows from memory otherwise, which the caller can detect through a
+/// non-zero `remaining` count.
+pub async fn forget_detailed(ids: &[String]) -> Result<CursorSideRemoval> {
+    let mut report = CursorSideRemoval::default();
     let Some(path) = state_db_path() else {
-        return Ok(0);
+        return Ok(report);
     };
     let options = SqliteConnectOptions::new()
         .filename(&path)
@@ -239,29 +332,80 @@ pub async fn forget(ids: &[String]) -> Result<u64> {
         .connect_with(options)
         .await?;
 
-    let mut removed = 0u64;
     for id in ids {
-        let result = sqlx::query("DELETE FROM composerHeaders WHERE composerId = ?")
+        let disk = cursor_disk_patterns(id);
+        let items = item_table_keys(id);
+
+        let composer_headers = sqlx::query("DELETE FROM composerHeaders WHERE composerId = ?")
             .bind(id)
             .execute(&pool)
-            .await?;
-        removed += result.rows_affected();
-        for pattern in [
-            "composerData:{id}",
-            "bubbleId:{id}:%",
-            "checkpointId:{id}:%",
-            "messageRequestContext:{id}:%",
-        ] {
-            let key = pattern.replace("{id}", id);
+            .await?
+            .rows_affected();
+
+        let mut conversation_headers = 0u64;
+        let mut bubbles = 0u64;
+        let mut checkpoints = 0u64;
+        let mut conversation_data = 0u64;
+        let mut file_caches = 0u64;
+        let mut request_contexts = 0u64;
+        for pattern in &disk {
             let result = sqlx::query("DELETE FROM cursorDiskKV WHERE key LIKE ?")
+                .bind(pattern)
+                .execute(&pool)
+                .await?;
+            let affected = result.rows_affected();
+            match pattern.as_str() {
+                p if p.starts_with("composerConvHeaders:") => conversation_headers += affected,
+                p if p.starts_with("bubbleId:") => bubbles += affected,
+                p if p.starts_with("checkpointId:") => checkpoints += affected,
+                p if p.starts_with("messageRequestContext:") => request_contexts += affected,
+                p if p.starts_with("ofsContent:") => file_caches += affected,
+                _ => conversation_data += affected,
+            }
+        }
+
+        let mut ui_state = 0u64;
+        for key in &items {
+            let result = sqlx::query("DELETE FROM ItemTable WHERE [key] = ?")
                 .bind(key)
                 .execute(&pool)
                 .await?;
-            removed += result.rows_affected();
+            ui_state += result.rows_affected();
         }
+
+        report.composer_headers += composer_headers;
+        report.conversation_headers += conversation_headers;
+        report.bubbles += bubbles;
+        report.checkpoints += checkpoints;
+        report.conversation_data += conversation_data;
+        report.file_caches += file_caches;
+        report.request_contexts += request_contexts;
+        report.ui_state += ui_state;
+        report.removed += composer_headers
+            + conversation_headers
+            + bubbles
+            + checkpoints
+            + conversation_data
+            + file_caches
+            + request_contexts
+            + ui_state;
+
+        let header_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM composerHeaders WHERE composerId = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await?;
+        report.remaining += count_rows_like(&pool, &disk).await?;
+        report.remaining += header_rows.max(0) as u64;
+        report.remaining += count_item_table_keys(&pool, &items).await?;
     }
     pool.close().await;
-    Ok(removed)
+    report.found = report.is_found();
+    Ok(report)
+}
+
+/// Backwards-compatible wrapper: only the total removed count is returned.
+pub async fn forget(ids: &[String]) -> Result<u64> {
+    Ok(forget_detailed(ids).await?.removed)
 }
 
 #[cfg(test)]
@@ -304,5 +448,84 @@ mod tests {
     fn empty_window_has_no_folder() {
         let parsed: WorkspaceIdentifier = serde_json::from_str(r#"{"id":"empty-window"}"#).unwrap();
         assert_eq!(parsed.folder(), "");
+    }
+
+    const SAMPLE_ID: &str = "216c2f3b-3098-4179-a48f-4cb624c7de52";
+
+    #[test]
+    fn disk_patterns_cover_every_key_family() {
+        let patterns = cursor_disk_patterns(SAMPLE_ID);
+        // Every observed key family must be matched by exactly one pattern.
+        for key in [
+            format!("bubbleId:{SAMPLE_ID}:0d40b5f6-7e32-4e7f-b964-0208df56838b"),
+            format!("bubbleId:{SAMPLE_ID}:0d40b5f6-7e32-4e7f-b964-0208df56838b/s:0"),
+            format!("bubbleId:{SAMPLE_ID}:0d40b5f6-7e32-4e7f-b964-0208df56838b/t:call_8cbf538a4a13491a9f1260f98e29118d"),
+            format!("bubbleId:{SAMPLE_ID}:0d40b5f6-7e32-4e7f-b964-0208df56838b/t1:call_20d9386495c846469508bee98939"),
+            format!("checkpointId:{SAMPLE_ID}:18771c23-ce32-4205-a14f-0b8958920c42"),
+            format!("composerConvHeaders:{SAMPLE_ID}:000000"),
+            format!("composerData:{SAMPLE_ID}"),
+            format!("composerRootWriterDiagnostic:{SAMPLE_ID}"),
+            format!("composerTranscriptHeightTail:{SAMPLE_ID}"),
+            format!("ofsContent:{SAMPLE_ID}:file:///d%3A/Users/CHD/Documents/work_code/shankblock/AGENTS.md"),
+            format!("messageRequestContext:{SAMPLE_ID}:abc"),
+        ] {
+            assert!(
+                patterns.iter().any(|pattern| sql_like_match(pattern, &key)),
+                "no pattern matches {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn disk_patterns_do_not_leak_across_conversations() {
+        let patterns = cursor_disk_patterns(SAMPLE_ID);
+        // A different conversation id must not match: the prefix is fixed
+        // per family, so a sibling id sharing a prefix cannot sneak through.
+        for key in [
+            format!("bubbleId:216c2f3b-3098-4179-a48f-4cb624c7de529:%"),
+            format!("composerData:{SAMPLE_ID}-extra"),
+        ] {
+            for pattern in &patterns {
+                assert!(
+                    !sql_like_match(pattern, &key),
+                    "pattern {pattern} should not match {key}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn item_table_keys_are_exact() {
+        let keys = item_table_keys(SAMPLE_ID);
+        assert_eq!(
+            keys,
+            [
+                format!("cursor/glass.editorPanelFullscreen/{SAMPLE_ID}"),
+                format!("glass.agentConversationPanes.{SAMPLE_ID}"),
+                format!("glass/cursor.editorPanelVisibility.agent/{SAMPLE_ID}"),
+            ]
+        );
+    }
+
+    /// SQLite `LIKE` semantics, with `%` and `_` as wildcards, so the tests
+    /// can assert which keys each deletion pattern actually matches.
+    fn sql_like_match(pattern: &str, key: &str) -> bool {
+        fn match_from(pattern: &[char], key: &[char]) -> bool {
+            match pattern.first() {
+                None => key.is_empty(),
+                Some('%') => {
+                    let rest = &pattern[1..];
+                    (0..=key.len()).any(|skip| match_from(rest, &key[skip..]))
+                }
+                Some('_') => !key.is_empty() && match_from(&pattern[1..], &key[1..]),
+                Some(&expected) => {
+                    key.first() == Some(&expected) && match_from(&pattern[1..], &key[1..])
+                }
+            }
+        }
+        match_from(
+            &pattern.chars().collect::<Vec<_>>(),
+            &key.chars().collect::<Vec<_>>(),
+        )
     }
 }

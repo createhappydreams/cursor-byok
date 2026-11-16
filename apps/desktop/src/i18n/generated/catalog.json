@@ -365,18 +365,6 @@
         }
       ]
     },
-    "0c9f38e75a4e6e4a": {
-      "source": "这会直接修改 Cursor 的数据库，删除该对话在侧边栏的条目（含对话内容与气泡数据）。请先完全退出 Cursor，否则修改会被写回。确定继续？",
-      "kind": "text",
-      "placeholders": [],
-      "refs": [
-        {
-          "file": "features/conversations/ConversationsPage.tsx",
-          "line": 119,
-          "column": 9
-        }
-      ]
-    },
     "0d2dab3d62eb73d6": {
       "source": "全部统计数据已清理",
       "kind": "text",
@@ -544,7 +532,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 147,
+          "line": 215,
           "column": 12
         }
       ]
@@ -786,6 +774,18 @@
         }
       ]
     },
+    "1b55307e513200b1": {
+      "source": "BYOK 本地没有这条对话的数据",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 285,
+          "column": 57
+        }
+      ]
+    },
     "1b5932b8946d2d68": {
       "source": "删除模型",
       "kind": "text",
@@ -882,6 +882,18 @@
         }
       ]
     },
+    "1e479511c0bbc94c": {
+      "source": "会话文档",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 52,
+          "column": 75
+        }
+      ]
+    },
     "1f9b46e61efcccb5": {
       "source": "筛选项：{label}，{summary}",
       "kind": "template",
@@ -964,7 +976,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 216,
+          "line": 296,
           "column": 63
         }
       ]
@@ -990,6 +1002,18 @@
           "file": "features/models/CursorSettingsPage.tsx",
           "line": 327,
           "column": 136
+        }
+      ]
+    },
+    "22eafd31f7466f2f": {
+      "source": "界面状态",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 57,
+          "column": 57
         }
       ]
     },
@@ -1057,6 +1081,30 @@
         }
       ]
     },
+    "270e5c3628fd7e08": {
+      "source": "一步到位：同时删除 BYOK 本地数据与 Cursor 侧的全部数据（侧边栏条目、气泡、快照、文件缓存）。请先完全退出 Cursor，否则 Cursor 会把删除的数据从内存写回。确定彻底删除？",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 175,
+          "column": 9
+        }
+      ]
+    },
+    "2713f1f40f84aabf": {
+      "source": "本地已删",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 188,
+          "column": 11
+        }
+      ]
+    },
     "29585d7193539200": {
       "source": "当前版本 {version}",
       "kind": "template",
@@ -1080,6 +1128,18 @@
           "file": "features/models/CursorSettingsPage.tsx",
           "line": 48,
           "column": 43
+        }
+      ]
+    },
+    "2971dcf3e1ac28fe": {
+      "source": "列表条目",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 53,
+          "column": 81
         }
       ]
     },
@@ -1114,7 +1174,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 155,
+          "line": 223,
           "column": 42
         }
       ]
@@ -1357,11 +1417,6 @@
       "kind": "text",
       "placeholders": [],
       "refs": [
-        {
-          "file": "features/conversations/ConversationsPage.tsx",
-          "line": 208,
-          "column": 72
-        },
         {
           "file": "features/models/CursorModelCards.tsx",
           "line": 173,
@@ -1650,8 +1705,13 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 106,
+          "line": 136,
           "column": 36
+        },
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 189,
+          "column": 44
         }
       ]
     },
@@ -1707,18 +1767,6 @@
           "file": "features/home/charts/ContributionCalendarChart.tsx",
           "line": 128,
           "column": 16
-        }
-      ]
-    },
-    "3cfb0d214d5e1dcf": {
-      "source": "先完全退出 Cursor 再清侧边栏",
-      "kind": "text",
-      "placeholders": [],
-      "refs": [
-        {
-          "file": "features/conversations/ConversationsPage.tsx",
-          "line": 147,
-          "column": 27
         }
       ]
     },
@@ -1864,6 +1912,18 @@
           "file": "features/calls/CallDetails.tsx",
           "line": 63,
           "column": 68
+        }
+      ]
+    },
+    "42a6cea6f3e7d7a1": {
+      "source": "已彻底移除",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 65,
+          "column": 26
         }
       ]
     },
@@ -2133,8 +2193,8 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 131,
-          "column": 61
+          "line": 58,
+          "column": 38
         }
       ]
     },
@@ -2145,12 +2205,12 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 48,
+          "line": 78,
           "column": 42
         },
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 165,
+          "line": 233,
           "column": 38
         }
       ]
@@ -2169,6 +2229,18 @@
           "file": "shell/AppLayout.tsx",
           "line": 205,
           "column": 67
+        }
+      ]
+    },
+    "4d31b0e672626759": {
+      "source": "本地无数据",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 194,
+          "column": 20
         }
       ]
     },
@@ -2196,7 +2268,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 153,
+          "line": 221,
           "column": 41
         }
       ]
@@ -2478,18 +2550,6 @@
           "file": "features/settings/TabSettingsCard.tsx",
           "line": 84,
           "column": 20
-        }
-      ]
-    },
-    "593dbdc41973aa54": {
-      "source": "已移除 Cursor 侧边栏条目",
-      "kind": "text",
-      "placeholders": [],
-      "refs": [
-        {
-          "file": "features/conversations/ConversationsPage.tsx",
-          "line": 131,
-          "column": 13
         }
       ]
     },
@@ -2813,7 +2873,7 @@
       "refs": [
         {
           "file": "shared/api.ts",
-          "line": 567,
+          "line": 588,
           "column": 43
         }
       ]
@@ -2976,7 +3036,12 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 154,
+          "line": 54,
+          "column": 63
+        },
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 222,
           "column": 41
         }
       ]
@@ -3039,7 +3104,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 152,
+          "line": 220,
           "column": 18
         }
       ]
@@ -3078,6 +3143,18 @@
         }
       ]
     },
+    "6efa31dee7a053c0": {
+      "source": "请求上下文",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 56,
+          "column": 73
+        }
+      ]
+    },
     "7005693f4f050bce": {
       "source": "缓存读写 {cost}",
       "kind": "template",
@@ -3099,7 +3176,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 200,
+          "line": 271,
           "column": 26
         }
       ]
@@ -3142,6 +3219,18 @@
           "file": "features/settings/SettingsPage.tsx",
           "line": 167,
           "column": 16
+        }
+      ]
+    },
+    "756cd8bd35a5829b": {
+      "source": "仅 Cursor 侧",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 257,
+          "column": 69
         }
       ]
     },
@@ -3188,7 +3277,7 @@
       "refs": [
         {
           "file": "shared/api.ts",
-          "line": 562,
+          "line": 583,
           "column": 43
         }
       ]
@@ -3202,6 +3291,18 @@
           "file": "features/home/metrics/HomeMetrics.tsx",
           "line": 137,
           "column": 50
+        }
+      ]
+    },
+    "7aa6d0ef5feb745c": {
+      "source": "彻底删除",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 279,
+          "column": 72
         }
       ]
     },
@@ -3354,7 +3455,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 105,
+          "line": 135,
           "column": 9
         }
       ]
@@ -3402,7 +3503,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 33,
+          "line": 38,
           "column": 33
         }
       ]
@@ -3589,7 +3690,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 208,
+          "line": 279,
           "column": 61
         }
       ]
@@ -4493,6 +4594,18 @@
         }
       ]
     },
+    "aa637daa2a3c66ae": {
+      "source": "行残留：Cursor 可能还在运行并把数据写回了，请完全退出后重试",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 61,
+          "column": 60
+        }
+      ]
+    },
     "ab9084a640fbb864": {
       "source": "全不选",
       "kind": "text",
@@ -4712,6 +4825,18 @@
         }
       ]
     },
+    "b2c456aee1ff3d55": {
+      "source": "次运行",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 191,
+          "column": 41
+        }
+      ]
+    },
     "b4411558b932266f": {
       "source": "上游类型",
       "kind": "text",
@@ -4721,6 +4846,18 @@
           "file": "features/calls/CallDetails.tsx",
           "line": 21,
           "column": 6
+        }
+      ]
+    },
+    "b4b35dae92ac2997": {
+      "source": "气泡",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 51,
+          "column": 55
         }
       ]
     },
@@ -4827,6 +4964,30 @@
         }
       ]
     },
+    "b7aa5583c228664f": {
+      "source": "Cursor 侧已删",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 59,
+          "column": 22
+        }
+      ]
+    },
+    "b84d5761665a7ee7": {
+      "source": "这会直接修改 Cursor 的数据库，删除该对话在侧边栏的全部数据（气泡、快照、文件缓存、列表条目）。请先完全退出 Cursor，否则修改会被写回。确定继续？",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 149,
+          "column": 9
+        }
+      ]
+    },
     "b86967982067d295": {
       "source": "（估算）",
       "kind": "text",
@@ -4877,6 +5038,18 @@
           "file": "features/calls/CallTable.tsx",
           "line": 64,
           "column": 15
+        }
+      ]
+    },
+    "b9a987eac22d2685": {
+      "source": "文件缓存",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 55,
+          "column": 63
         }
       ]
     },
@@ -5038,6 +5211,18 @@
         }
       ]
     },
+    "bf4ad761840fcd0a": {
+      "source": "本地",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 255,
+          "column": 77
+        }
+      ]
+    },
     "bf57afd709694b55": {
       "source": "概览时间范围",
       "kind": "text",
@@ -5090,6 +5275,18 @@
         }
       ]
     },
+    "c2a4a6c47bfc55a3": {
+      "source": "彻底删除前请先完全退出 Cursor",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 215,
+          "column": 27
+        }
+      ]
+    },
     "c3760858cdb6d9f4": {
       "source": "请求体",
       "kind": "text",
@@ -5114,8 +5311,13 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 106,
+          "line": 136,
           "column": 72
+        },
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 189,
+          "column": 86
         }
       ]
     },
@@ -5750,18 +5952,6 @@
         }
       ]
     },
-    "dfeffd2cbc7c2327": {
-      "source": "删除后本地不再保留这段对话的数据。Cursor 侧边栏条目会保留，如需一并移除请先点「清侧边栏」。确定删除？",
-      "kind": "text",
-      "placeholders": [],
-      "refs": [
-        {
-          "file": "features/conversations/ConversationsPage.tsx",
-          "line": 94,
-          "column": 9
-        }
-      ]
-    },
     "e025f1ff71996425": {
       "source": "已设置",
       "kind": "text",
@@ -6062,6 +6252,18 @@
         }
       ]
     },
+    "e968cc0e2a143dd9": {
+      "source": "删本地",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 288,
+          "column": 26
+        }
+      ]
+    },
     "e9d8d890d33584e8": {
       "source": "没有可用的重置卡。",
       "kind": "text",
@@ -6165,6 +6367,18 @@
         }
       ]
     },
+    "ed3a701b3244847b": {
+      "source": "删除后本地不再保留这段对话的数据。Cursor 侧边栏条目会保留，如需一并移除请点「彻底删除」。确定删除？",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 124,
+          "column": 9
+        }
+      ]
+    },
     "edc70de18c6da1a6": {
       "source": "安装本地 CA",
       "kind": "text",
@@ -6196,7 +6410,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 132,
+          "line": 162,
           "column": 13
         }
       ]
@@ -6481,7 +6695,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 224,
+          "line": 304,
           "column": 14
         },
         {
@@ -6590,6 +6804,18 @@
           "file": "features/models/CursorSettingsPage.tsx",
           "line": 339,
           "column": 21
+        }
+      ]
+    },
+    "fc5f1bdf71d5ee0f": {
+      "source": "⚠ 仍有",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 61,
+          "column": 27
         }
       ]
     },

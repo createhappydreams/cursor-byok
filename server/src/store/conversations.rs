@@ -26,6 +26,11 @@ pub struct ConversationSummary {
     pub message_count: i64,
     pub checkpoint_count: i64,
     pub last_used_ms: i64,
+    /// Whether Cursor's own database still knows this chat (sidebar entry).
+    pub in_cursor: bool,
+    /// Whether this server still stores data for the chat. Rows that only
+    /// exist in Cursor's sidebar set this to false.
+    pub local: bool,
 }
 
 /// Row counts removed by [`Store::purge_conversation`].
@@ -166,6 +171,8 @@ impl Store {
                 title: String::new(),
                 workspace: String::new(),
                 subagent: false,
+                in_cursor: false,
+                local: true,
             })
             .collect())
     }

@@ -491,6 +491,10 @@ export interface ConversationSummary {
   message_count: number;
   checkpoint_count: number;
   last_used_ms: number;
+  /** Whether Cursor's own database still knows this chat (sidebar entry). */
+  in_cursor: boolean;
+  /** Whether this server still stores data for the chat. */
+  local: boolean;
 }
 
 export interface PurgedConversation {
@@ -500,11 +504,28 @@ export interface PurgedConversation {
   llm_calls: number;
 }
 
-export interface SidebarRemoval {
-  /** Rows deleted from Cursor's state database. */
+/** Per-family row counts removed from Cursor's state database. */
+export interface CursorSideRemoval {
+  composer_headers: number;
+  bubbles: number;
+  checkpoints: number;
+  conversation_headers: number;
+  conversation_data: number;
+  file_caches: number;
+  request_contexts: number;
+  ui_state: number;
+  /** Total rows removed across every family. */
   removed: number;
-  /** Whether the chat existed in Cursor's sidebar at all. */
+  /** Whether any row matched at all. */
   found: boolean;
+  /** Rows still matching after the deletes; 0 means really gone. */
+  remaining: number;
+}
+
+export interface EverywhereRemoval {
+  local: PurgedConversation | null;
+  cursor: CursorSideRemoval | null;
+  cursor_error: string | null;
 }
 
 export const api = {
@@ -572,7 +593,8 @@ export const api = {
   calls: () => request<LlmCall[]>("/llm-calls?limit=200"),
   conversations: () => request<ConversationSummary[]>("/conversations"),
   deleteConversation: (id: string) => request<PurgedConversation>(`/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  deleteSidebarEntry: (id: string) => request<SidebarRemoval>(`/conversations/${encodeURIComponent(id)}/sidebar-entry`, { method: "DELETE" }),
+  deleteSidebarEntry: (id: string) => request<CursorSideRemoval>(`/conversations/${encodeURIComponent(id)}/sidebar-entry`, { method: "DELETE" }),
+  deleteEverywhere: (id: string) => request<EverywhereRemoval>(`/conversations/${encodeURIComponent(id)}/everywhere`, { method: "DELETE" }),
   call: (id: string) => request<CallDetail>(`/llm-calls/${encodeURIComponent(id)}`),
   openCallDetails: async (id: string) => {
     const url = new URL(window.location.href);

@@ -37,7 +37,7 @@
 
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px 64px 140px 160px;
+  grid-template-columns: minmax(0, 1fr) 64px 64px 140px 250px;
   gap: 12px;
   align-items: center;
   padding: 10px 8px;
@@ -187,6 +187,54 @@
 .sidebar:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.everywhere {
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(178, 74, 74, 0.45);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.everywhere:hover:not(:disabled) {
+  border-color: #d4537e;
+  color: #d4537e;
+}
+
+.everywhere:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.badgeCursor,
+.badgeLocal,
+.badgeOnlyCursor {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 15px;
+  border-radius: 999px;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
+.badgeCursor {
+  border: 1px solid rgba(186, 117, 23, 0.5);
+  color: #ba7517;
+}
+
+.badgeLocal {
+  border: 1px solid rgba(64, 130, 201, 0.5);
+  color: #4082c9;
+}
+
+.badgeOnlyCursor {
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  opacity: 0.75;
 }
 
 .delete {
