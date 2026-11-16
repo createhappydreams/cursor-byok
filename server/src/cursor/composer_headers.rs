@@ -259,7 +259,7 @@ impl CursorSideRemoval {
     }
 }
 
-/// Every `cursorDiskKV` key family a conversation owns.
+/// Every `cursorDiskKV` key family a conversation owns, as `GLOB` patterns.
 ///
 /// Surveyed against Cursor 3.30: `bubbleId` carries the chat bubbles and
 /// their `/s:` stream shards plus `/t:` tool-call shards, `checkpointId` the
@@ -267,16 +267,24 @@ impl CursorSideRemoval {
 /// `composerData` the conversation document itself, `composerRootWriterDiagnostic`
 /// and `composerTranscriptHeightTail` writer state, `ofsContent` cached copies
 /// of files the agent read, and `messageRequestContext` request metadata.
+///
+/// `GLOB` instead of `LIKE` is what keeps this fast: the table holds millions of
+/// rows, and SQLite can only turn a pattern into an index range scan when the
+/// comparison is case sensitive. `LIKE` ignores case by default, so every
+/// pattern degraded into a full scan of the whole key index (~1.3 s each on a
+/// 4.6M-row table, sixteen times per conversation once the residual check is
+/// counted). `GLOB` is case sensitive and runs as a range search in
+/// microseconds.
 fn cursor_disk_patterns(id: &str) -> Vec<String> {
     vec![
-        format!("bubbleId:{id}:%"),
-        format!("checkpointId:{id}:%"),
-        format!("composerConvHeaders:{id}:%"),
+        format!("bubbleId:{id}:*"),
+        format!("checkpointId:{id}:*"),
+        format!("composerConvHeaders:{id}:*"),
         format!("composerData:{id}"),
         format!("composerRootWriterDiagnostic:{id}"),
         format!("composerTranscriptHeightTail:{id}"),
-        format!("ofsContent:{id}:%"),
-        format!("messageRequestContext:{id}:%"),
+        format!("ofsContent:{id}:*"),
+        format!("messageRequestContext:{id}:*"),
     ]
 }
 
@@ -290,9 +298,10 @@ fn item_table_keys(id: &str) -> [String; 3] {
 }
 
 /// The per-conversation tab state lives under a workspace-scoped key, so it
-/// needs a `LIKE` pattern instead of an exact key: `cursor/glass.tabs.v2/<ws>/<id>/state.json`.
+/// needs a pattern instead of an exact key:
+/// `cursor/glass.tabs.v2/<ws>/<id>/state.json`.
 fn item_table_tabs_pattern(id: &str) -> String {
-    format!("cursor/glass.tabs.v2/%/{id}/state.json")
+    format!("cursor/glass.tabs.v2/*/{id}/state.json")
 }
 
 /// ItemTable keys whose **value** embeds conversation ids: Cursor's glass UI
@@ -336,24 +345,30 @@ fn scrub_references(value: &serde_json::Value, id: &str) -> Option<serde_json::V
     }
 }
 
-async fn count_rows_like(pool: &sqlx::SqlitePool, patterns: &[String]) -> Result<u64> {
+async fn count_disk_rows(
+    connection: &mut sqlx::SqliteConnection,
+    patterns: &[String],
+) -> Result<u64> {
     let mut total = 0u64;
     for pattern in patterns {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cursorDiskKV WHERE key LIKE ?")
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cursorDiskKV WHERE key GLOB ?")
             .bind(pattern)
-            .fetch_one(pool)
+            .fetch_one(&mut *connection)
             .await?;
         total += count.max(0) as u64;
     }
     Ok(total)
 }
 
-async fn count_item_table_keys(pool: &sqlx::SqlitePool, keys: &[String]) -> Result<u64> {
+async fn count_item_table_keys(
+    connection: &mut sqlx::SqliteConnection,
+    keys: &[String],
+) -> Result<u64> {
     let mut total = 0u64;
     for key in keys {
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ItemTable WHERE [key] = ?")
             .bind(key)
-            .fetch_one(pool)
+            .fetch_one(&mut *connection)
             .await?;
         total += count.max(0) as u64;
     }
@@ -363,18 +378,21 @@ async fn count_item_table_keys(pool: &sqlx::SqlitePool, keys: &[String]) -> Resu
 /// Counts the workspace-scoped tab key and every reference key whose value
 /// still mentions the conversation, so a rewrite by a running Cursor shows up
 /// in `remaining` instead of silently surviving the purge.
-async fn count_item_table_references(pool: &sqlx::SqlitePool, id: &str) -> Result<u64> {
-    let tabs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ItemTable WHERE [key] LIKE ?")
+async fn count_item_table_references(
+    connection: &mut sqlx::SqliteConnection,
+    id: &str,
+) -> Result<u64> {
+    let tabs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ItemTable WHERE [key] GLOB ?")
         .bind(item_table_tabs_pattern(id))
-        .fetch_one(pool)
+        .fetch_one(&mut *connection)
         .await?;
     let mut filters = Vec::new();
     for (index, filter) in ITEM_TABLE_REFERENCE_KEY_FILTERS.iter().enumerate() {
         if index == 0 {
             filters.push(format!("[key] = '{filter}'"));
         } else {
-            // `_` and `%` never appear in these key prefixes, so embedding is safe.
-            filters.push(format!("[key] LIKE '{filter}%'"));
+            // `*` and `?` never appear in these key prefixes, so embedding is safe.
+            filters.push(format!("[key] GLOB '{filter}*'"));
         }
     }
     let references: i64 = sqlx::query_scalar(&format!(
@@ -382,7 +400,7 @@ async fn count_item_table_references(pool: &sqlx::SqlitePool, id: &str) -> Resul
         filters.join(" OR ")
     ))
     .bind(format!("%{id}%"))
-    .fetch_one(pool)
+    .fetch_one(&mut *connection)
     .await?;
     Ok((tabs.max(0) as u64) + (references.max(0) as u64))
 }
@@ -406,13 +424,19 @@ pub async fn forget_detailed(ids: &[String]) -> Result<CursorSideRemoval> {
         .connect_with(options)
         .await?;
 
+    // One transaction for the whole batch: every statement would otherwise be
+    // its own commit, and a 56 GB database fsyncs each of them. Removing a
+    // single conversation issues sixteen statements, so a batch of a thousand
+    // paid sixteen thousand commits for no benefit.
+    let mut transaction = pool.begin().await?;
+
     for id in ids {
         let disk = cursor_disk_patterns(id);
         let items = item_table_keys(id);
 
         let composer_headers = sqlx::query("DELETE FROM composerHeaders WHERE composerId = ?")
             .bind(id)
-            .execute(&pool)
+            .execute(&mut *transaction)
             .await?
             .rows_affected();
 
@@ -423,9 +447,9 @@ pub async fn forget_detailed(ids: &[String]) -> Result<CursorSideRemoval> {
         let mut file_caches = 0u64;
         let mut request_contexts = 0u64;
         for pattern in &disk {
-            let result = sqlx::query("DELETE FROM cursorDiskKV WHERE key LIKE ?")
+            let result = sqlx::query("DELETE FROM cursorDiskKV WHERE key GLOB ?")
                 .bind(pattern)
-                .execute(&pool)
+                .execute(&mut *transaction)
                 .await?;
             let affected = result.rows_affected();
             match pattern.as_str() {
@@ -442,15 +466,15 @@ pub async fn forget_detailed(ids: &[String]) -> Result<CursorSideRemoval> {
         for key in &items {
             let result = sqlx::query("DELETE FROM ItemTable WHERE [key] = ?")
                 .bind(key)
-                .execute(&pool)
+                .execute(&mut *transaction)
                 .await?;
             ui_state += result.rows_affected();
         }
 
         // The workspace-scoped tab state for this conversation.
-        let result = sqlx::query("DELETE FROM ItemTable WHERE [key] LIKE ?")
+        let result = sqlx::query("DELETE FROM ItemTable WHERE [key] GLOB ?")
             .bind(item_table_tabs_pattern(id))
-            .execute(&pool)
+            .execute(&mut *transaction)
             .await?;
         ui_state += result.rows_affected();
 
@@ -464,7 +488,7 @@ pub async fn forget_detailed(ids: &[String]) -> Result<CursorSideRemoval> {
             if index == 0 {
                 reference_filters.push(format!("[key] = '{filter}'"));
             } else {
-                reference_filters.push(format!("[key] LIKE '{filter}%'"));
+                reference_filters.push(format!("[key] GLOB '{filter}*'"));
             }
         }
         let rows = sqlx::query(&format!(
@@ -472,7 +496,7 @@ pub async fn forget_detailed(ids: &[String]) -> Result<CursorSideRemoval> {
             reference_filters.join(" OR ")
         ))
         .bind(format!("%{id}%"))
-        .fetch_all(&pool)
+        .fetch_all(&mut *transaction)
         .await?;
         for row in rows {
             let key: String = row.get(0);
@@ -483,7 +507,7 @@ pub async fn forget_detailed(ids: &[String]) -> Result<CursorSideRemoval> {
                     None => {
                         let result = sqlx::query("DELETE FROM ItemTable WHERE [key] = ?")
                             .bind(&key)
-                            .execute(&pool)
+                            .execute(&mut *transaction)
                             .await?;
                         ui_state += result.rows_affected();
                     }
@@ -492,7 +516,7 @@ pub async fn forget_detailed(ids: &[String]) -> Result<CursorSideRemoval> {
                         let result = sqlx::query("UPDATE ItemTable SET value = ? WHERE [key] = ?")
                             .bind(encoded)
                             .bind(&key)
-                            .execute(&pool)
+                            .execute(&mut *transaction)
                             .await?;
                         ui_state += result.rows_affected();
                     }
@@ -502,7 +526,7 @@ pub async fn forget_detailed(ids: &[String]) -> Result<CursorSideRemoval> {
                 Err(_) if raw.trim() == *id => {
                     let result = sqlx::query("DELETE FROM ItemTable WHERE [key] = ?")
                         .bind(&key)
-                        .execute(&pool)
+                        .execute(&mut *transaction)
                         .await?;
                     ui_state += result.rows_affected();
                 }
@@ -529,13 +553,15 @@ pub async fn forget_detailed(ids: &[String]) -> Result<CursorSideRemoval> {
 
         let header_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM composerHeaders WHERE composerId = ?")
             .bind(id)
-            .fetch_one(&pool)
+            .fetch_one(&mut *transaction)
             .await?;
-        report.remaining += count_rows_like(&pool, &disk).await?;
+        report.remaining += count_disk_rows(&mut transaction, &disk).await?;
         report.remaining += header_rows.max(0) as u64;
-        report.remaining += count_item_table_keys(&pool, &items).await?;
-        report.remaining += count_item_table_references(&pool, id).await?;
+        report.remaining += count_item_table_keys(&mut transaction, &items).await?;
+        report.remaining += count_item_table_references(&mut transaction, id).await?;
     }
+
+    transaction.commit().await?;
     pool.close().await;
     report.found = report.is_found();
     Ok(report)
@@ -608,7 +634,7 @@ mod tests {
             format!("messageRequestContext:{SAMPLE_ID}:abc"),
         ] {
             assert!(
-                patterns.iter().any(|pattern| sql_like_match(pattern, &key)),
+                patterns.iter().any(|pattern| glob_match(pattern, &key)),
                 "no pattern matches {key}"
             );
         }
@@ -625,7 +651,7 @@ mod tests {
         ] {
             for pattern in &patterns {
                 assert!(
-                    !sql_like_match(pattern, &key),
+                    !glob_match(pattern, &key),
                     "pattern {pattern} should not match {key}"
                 );
             }
@@ -645,17 +671,17 @@ mod tests {
         );
     }
 
-    /// SQLite `LIKE` semantics, with `%` and `_` as wildcards, so the tests
+    /// SQLite `GLOB` semantics, with `*` and `?` as wildcards, so the tests
     /// can assert which keys each deletion pattern actually matches.
-    fn sql_like_match(pattern: &str, key: &str) -> bool {
+    fn glob_match(pattern: &str, key: &str) -> bool {
         fn match_from(pattern: &[char], key: &[char]) -> bool {
             match pattern.first() {
                 None => key.is_empty(),
-                Some('%') => {
+                Some('*') => {
                     let rest = &pattern[1..];
                     (0..=key.len()).any(|skip| match_from(rest, &key[skip..]))
                 }
-                Some('_') => !key.is_empty() && match_from(&pattern[1..], &key[1..]),
+                Some('?') => !key.is_empty() && match_from(&pattern[1..], &key[1..]),
                 Some(&expected) => {
                     key.first() == Some(&expected) && match_from(&pattern[1..], &key[1..])
                 }
@@ -670,17 +696,17 @@ mod tests {
     #[test]
     fn tabs_pattern_matches_workspace_scoped_key_only() {
         let pattern = item_table_tabs_pattern(SAMPLE_ID);
-        assert!(sql_like_match(
+        assert!(glob_match(
             &pattern,
             &format!("cursor/glass.tabs.v2/c53ea0cdbd81856b60305962e740c35e/{SAMPLE_ID}/state.json")
         ));
         // A different conversation's tab state must not match.
-        assert!(!sql_like_match(
+        assert!(!glob_match(
             &pattern,
             &format!("cursor/glass.tabs.v2/c53ea0cdbd81856b60305962e740c35e/00000000-0000-0000-0000-000000000000/state.json")
         ));
         // The workspace-level state stays: it only *references* chats.
-        assert!(!sql_like_match(
+        assert!(!glob_match(
             &pattern,
             &format!("cursor/glass.tabs.v2/c53ea0cdbd81856b60305962e740c35e/state.json")
         ));
