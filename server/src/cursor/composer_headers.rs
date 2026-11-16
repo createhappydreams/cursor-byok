@@ -289,6 +289,53 @@ fn item_table_keys(id: &str) -> [String; 3] {
     ]
 }
 
+/// The per-conversation tab state lives under a workspace-scoped key, so it
+/// needs a `LIKE` pattern instead of an exact key: `cursor/glass.tabs.v2/<ws>/<id>/state.json`.
+fn item_table_tabs_pattern(id: &str) -> String {
+    format!("cursor/glass.tabs.v2/%/{id}/state.json")
+}
+
+/// ItemTable keys whose **value** embeds conversation ids: Cursor's glass UI
+/// keeps "last/selected agent" pointers (the value is the bare conversation
+/// id), per-day nudge counters and think-time stats (arrays keyed by the id),
+/// and workspace tab state. Surveyed against Cursor 3.30.
+const ITEM_TABLE_REFERENCE_KEY_FILTERS: [&str; 2] =
+    ["composer.thinkTime.turnEnds", "cursor/glass."];
+
+/// Removes every trace of `id` from a glass-UI JSON blob: array elements that
+/// mention the conversation are dropped, object fields keyed by it or holding
+/// it as a bare string are dropped, and nested values are scrubbed the same
+/// way. `None` means the whole value *was* the reference and the key can go.
+fn scrub_references(value: &serde_json::Value, id: &str) -> Option<serde_json::Value> {
+    match value {
+        serde_json::Value::Array(items) => Some(serde_json::Value::Array(
+            items
+                .iter()
+                .filter(|item| {
+                    serde_json::to_string(item)
+                        .map(|encoded| !encoded.contains(id))
+                        .unwrap_or(true)
+                })
+                .cloned()
+                .collect(),
+        )),
+        serde_json::Value::Object(fields) => {
+            let mut kept = serde_json::Map::new();
+            for (key, field) in fields {
+                if key == id || field.as_str() == Some(id) {
+                    continue;
+                }
+                if let Some(scrubbed) = scrub_references(field, id) {
+                    kept.insert(key.clone(), scrubbed);
+                }
+            }
+            Some(serde_json::Value::Object(kept))
+        }
+        serde_json::Value::String(text) if text == id => None,
+        other => Some(other.clone()),
+    }
+}
+
 async fn count_rows_like(pool: &sqlx::SqlitePool, patterns: &[String]) -> Result<u64> {
     let mut total = 0u64;
     for pattern in patterns {
@@ -311,6 +358,33 @@ async fn count_item_table_keys(pool: &sqlx::SqlitePool, keys: &[String]) -> Resu
         total += count.max(0) as u64;
     }
     Ok(total)
+}
+
+/// Counts the workspace-scoped tab key and every reference key whose value
+/// still mentions the conversation, so a rewrite by a running Cursor shows up
+/// in `remaining` instead of silently surviving the purge.
+async fn count_item_table_references(pool: &sqlx::SqlitePool, id: &str) -> Result<u64> {
+    let tabs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ItemTable WHERE [key] LIKE ?")
+        .bind(item_table_tabs_pattern(id))
+        .fetch_one(pool)
+        .await?;
+    let mut filters = Vec::new();
+    for (index, filter) in ITEM_TABLE_REFERENCE_KEY_FILTERS.iter().enumerate() {
+        if index == 0 {
+            filters.push(format!("[key] = '{filter}'"));
+        } else {
+            // `_` and `%` never appear in these key prefixes, so embedding is safe.
+            filters.push(format!("[key] LIKE '{filter}%'"));
+        }
+    }
+    let references: i64 = sqlx::query_scalar(&format!(
+        "SELECT COUNT(*) FROM ItemTable WHERE ({}) AND CAST(value AS TEXT) LIKE ?",
+        filters.join(" OR ")
+    ))
+    .bind(format!("%{id}%"))
+    .fetch_one(pool)
+    .await?;
+    Ok((tabs.max(0) as u64) + (references.max(0) as u64))
 }
 
 /// Drops every Cursor-side row for the given conversations so they vanish
@@ -373,6 +447,69 @@ pub async fn forget_detailed(ids: &[String]) -> Result<CursorSideRemoval> {
             ui_state += result.rows_affected();
         }
 
+        // The workspace-scoped tab state for this conversation.
+        let result = sqlx::query("DELETE FROM ItemTable WHERE [key] LIKE ?")
+            .bind(item_table_tabs_pattern(id))
+            .execute(&pool)
+            .await?;
+        ui_state += result.rows_affected();
+
+        // Glass UI keys keep conversation references in their *value*: the
+        // "last/selected agent" pointers hold the bare id, the nudge counters
+        // and think-time stats hold arrays keyed by it, and the workspace tab
+        // state names it as the active agent. Scrub the id out of each value
+        // and drop the key entirely when the value was only the id.
+        let mut reference_filters = Vec::new();
+        for (index, filter) in ITEM_TABLE_REFERENCE_KEY_FILTERS.iter().enumerate() {
+            if index == 0 {
+                reference_filters.push(format!("[key] = '{filter}'"));
+            } else {
+                reference_filters.push(format!("[key] LIKE '{filter}%'"));
+            }
+        }
+        let rows = sqlx::query(&format!(
+            "SELECT [key], CAST(value AS TEXT) FROM ItemTable WHERE ({}) AND CAST(value AS TEXT) LIKE ?",
+            reference_filters.join(" OR ")
+        ))
+        .bind(format!("%{id}%"))
+        .fetch_all(&pool)
+        .await?;
+        for row in rows {
+            let key: String = row.get(0);
+            let raw: Option<String> = row.get(1);
+            let Some(raw) = raw else { continue };
+            match serde_json::from_str::<serde_json::Value>(&raw) {
+                Ok(value) => match scrub_references(&value, id) {
+                    None => {
+                        let result = sqlx::query("DELETE FROM ItemTable WHERE [key] = ?")
+                            .bind(&key)
+                            .execute(&pool)
+                            .await?;
+                        ui_state += result.rows_affected();
+                    }
+                    Some(scrubbed) if scrubbed != value => {
+                        let encoded = serde_json::to_string(&scrubbed)?;
+                        let result = sqlx::query("UPDATE ItemTable SET value = ? WHERE [key] = ?")
+                            .bind(encoded)
+                            .bind(&key)
+                            .execute(&pool)
+                            .await?;
+                        ui_state += result.rows_affected();
+                    }
+                    _ => {}
+                },
+                // Bare pointer values (a plain conversation id) are not JSON.
+                Err(_) if raw.trim() == *id => {
+                    let result = sqlx::query("DELETE FROM ItemTable WHERE [key] = ?")
+                        .bind(&key)
+                        .execute(&pool)
+                        .await?;
+                    ui_state += result.rows_affected();
+                }
+                Err(_) => {}
+            }
+        }
+
         report.composer_headers += composer_headers;
         report.conversation_headers += conversation_headers;
         report.bubbles += bubbles;
@@ -397,6 +534,7 @@ pub async fn forget_detailed(ids: &[String]) -> Result<CursorSideRemoval> {
         report.remaining += count_rows_like(&pool, &disk).await?;
         report.remaining += header_rows.max(0) as u64;
         report.remaining += count_item_table_keys(&pool, &items).await?;
+        report.remaining += count_item_table_references(&pool, id).await?;
     }
     pool.close().await;
     report.found = report.is_found();
@@ -527,5 +665,95 @@ mod tests {
             &pattern.chars().collect::<Vec<_>>(),
             &key.chars().collect::<Vec<_>>(),
         )
+    }
+
+    #[test]
+    fn tabs_pattern_matches_workspace_scoped_key_only() {
+        let pattern = item_table_tabs_pattern(SAMPLE_ID);
+        assert!(sql_like_match(
+            &pattern,
+            &format!("cursor/glass.tabs.v2/c53ea0cdbd81856b60305962e740c35e/{SAMPLE_ID}/state.json")
+        ));
+        // A different conversation's tab state must not match.
+        assert!(!sql_like_match(
+            &pattern,
+            &format!("cursor/glass.tabs.v2/c53ea0cdbd81856b60305962e740c35e/00000000-0000-0000-0000-000000000000/state.json")
+        ));
+        // The workspace-level state stays: it only *references* chats.
+        assert!(!sql_like_match(
+            &pattern,
+            &format!("cursor/glass.tabs.v2/c53ea0cdbd81856b60305962e740c35e/state.json")
+        ));
+    }
+
+    #[test]
+    fn scrub_drops_array_elements_mentioning_the_conversation() {
+        let value: serde_json::Value = serde_json::from_str(&format!(
+            r#"[{{"composerId":"11111111-1111-1111-1111-111111111111","endedAt":1}},{{"composerId":"{SAMPLE_ID}","endedAt":2}}]"#
+        ))
+        .unwrap();
+        let scrubbed = scrub_references(&value, SAMPLE_ID).unwrap();
+        assert_eq!(
+            scrubbed.to_string(),
+            r#"[{"composerId":"11111111-1111-1111-1111-111111111111","endedAt":1}]"#
+        );
+    }
+
+    #[test]
+    fn scrub_drops_object_fields_keyed_or_pointing_at_the_conversation() {
+        let value: serde_json::Value = serde_json::from_str(&format!(
+            r#"{{"version":1,"newAgentDraftKeys":{{"{SAMPLE_ID}":{{"key":"x"}},"empty-state-draft":{{"key":"y"}}}},"selected":"{SAMPLE_ID}"}}"#
+        ))
+        .unwrap();
+        let scrubbed = scrub_references(&value, SAMPLE_ID).unwrap();
+        let fields = scrubbed.as_object().unwrap();
+        assert!(!fields.contains_key("selected"));
+        let drafts = fields["newAgentDraftKeys"].as_object().unwrap();
+        assert!(!drafts.contains_key(SAMPLE_ID));
+        assert!(drafts.contains_key("empty-state-draft"));
+        assert_eq!(fields["version"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn scrub_bare_pointer_value_means_delete_the_key() {
+        let value: serde_json::Value = serde_json::Value::String(SAMPLE_ID.to_string());
+        assert!(scrub_references(&value, SAMPLE_ID).is_none());
+    }
+
+    #[test]
+    fn scrub_leaves_unrelated_values_untouched() {
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{"impressionCount":0,"showings":["a","b"],"count":42}"#,
+        )
+        .unwrap();
+        let scrubbed = scrub_references(&value, SAMPLE_ID).unwrap();
+        assert_eq!(scrubbed, value);
+    }
+
+    #[test]
+    fn reference_filters_cover_the_surveyed_pointer_families() {
+        // Keys whose *value* embeds a conversation id, from the Cursor 3.30 survey.
+        for key in [
+            "composer.thinkTime.turnEnds",
+            "cursor/glass.lastNonProjectAgent",
+            "cursor/glass.lastRealAgent",
+            "cursor/glass.lastStartedAgent",
+            "cursor/glass.selectedAgent",
+            &format!("cursor/glass.projectsNudge.chatDays.v1.google-oauth2%7Cuser_01KHXEVX71HTG0X8RX3EGSJY5G"),
+            &format!("cursor/glass.deployIntentPill.state.v1.google-oauth2%7Cuser_01KHXEVX71HTG0X8RX3EGSJY5G"),
+            "cursor/glass.tabs.v2/c53ea0cdbd81856b60305962e740c35e/state.json",
+        ] {
+            let matched = ITEM_TABLE_REFERENCE_KEY_FILTERS
+                .iter()
+                .enumerate()
+                .any(|(index, filter)| {
+                    if index == 0 {
+                        key == *filter
+                    } else {
+                        key.starts_with(filter)
+                    }
+                });
+            assert!(matched, "filter must select {key}");
+        }
     }
 }
