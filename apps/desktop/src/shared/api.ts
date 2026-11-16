@@ -502,6 +502,8 @@ export interface PurgedConversation {
   checkpoints: number;
   runs: number;
   llm_calls: number;
+  /** Content-addressed blobs reclaimed; 0 when other chats still share them. */
+  blobs: number;
 }
 
 /** Per-family row counts removed from Cursor's state database. */

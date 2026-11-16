@@ -40,6 +40,9 @@ pub struct PurgedConversation {
     pub checkpoints: i64,
     pub runs: i64,
     pub llm_calls: i64,
+    /// Content-addressed blobs reclaimed: the raw request/response bytes the
+    /// run traces pointed at. Counted only when no other row still needs them.
+    pub blobs: i64,
 }
 
 impl Store {
@@ -221,6 +224,29 @@ impl Store {
 
         let mut report = PurgedConversation::default();
 
+        // The trace artifacts point at content-addressed blobs that hold the raw
+        // request and response bytes of this conversation. They are not owned by
+        // a single row, so deleting the artifact rows alone would leave the chat
+        // content on disk until the age-based retention sweep, which can be days
+        // away. Collect what this conversation reaches first; the rows are gone
+        // afterwards, so the walk has to happen now.
+        let reachable: Vec<Vec<u8>> = sqlx::query_scalar(
+            "WITH RECURSIVE roots(blob_id) AS (
+                 SELECT a.blob_id FROM cursor_run_trace_artifacts a
+                 JOIN cursor_run_traces t ON t.request_id = a.request_id
+                 WHERE t.conversation_id = ?
+             ), reach(blob_id) AS (
+                 SELECT blob_id FROM roots
+                 UNION
+                 SELECT e.child_blob_id FROM blob_edges e
+                 JOIN reach r ON e.parent_blob_id = r.blob_id
+             )
+             SELECT blob_id FROM reach",
+        )
+        .bind(conversation_id)
+        .fetch_all(&mut *transaction)
+        .await?;
+
         for statement in [
             format!("DELETE FROM tool_round_calls WHERE round_id IN (SELECT round_id FROM tool_rounds WHERE run_id IN ({run_ids}))"),
             format!("DELETE FROM tool_rounds WHERE run_id IN ({run_ids})"),
@@ -279,14 +305,114 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
 
+        // Reclaim the blobs this conversation held. They are content-addressed
+        // and therefore shared: an identical byte range can back other chats,
+        // checkpoints or traces. Only blobs that nothing references any more
+        // may go, so the set is computed by reachability instead of being
+        // deleted wholesale.
+        let blobs = reclaim_blobs(&mut transaction, &reachable).await?;
+
         transaction.commit().await?;
 
         report.messages = messages as i64;
         report.checkpoints = checkpoints as i64;
         report.runs = runs as i64;
         report.llm_calls = llm_calls as i64;
+        report.blobs = blobs as i64;
         Ok(Some(report))
     }
+}
+
+/// Deletes the given blobs that no surviving row references, together with the
+/// edges that pointed at them. Returns the number of blobs removed.
+///
+/// A blob survives when a trace artifact still cites it, when it is reachable
+/// from such an artifact, or when a blob outside the candidate set still has an
+/// edge to it: the last case covers content shared with a chat that is not being
+/// purged, which must keep working after this transaction.
+async fn reclaim_blobs(
+    transaction: &mut Transaction<'_, Sqlite>,
+    candidates: &[Vec<u8>],
+) -> Result<u64> {
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+
+    sqlx::query("CREATE TEMP TABLE IF NOT EXISTS purge_blobs(blob_id BLOB PRIMARY KEY)")
+        .execute(&mut **transaction)
+        .await?;
+    sqlx::query("DELETE FROM purge_blobs")
+        .execute(&mut **transaction)
+        .await?;
+    for blob in candidates {
+        sqlx::query("INSERT OR IGNORE INTO purge_blobs(blob_id) VALUES (?)")
+            .bind(blob)
+            .execute(&mut **transaction)
+            .await?;
+    }
+
+    // Live set: every candidate a surviving artifact cites, plus everything
+    // reachable downwards from those, plus any candidate a surviving outside
+    // blob still has an edge to.
+    sqlx::query("CREATE TEMP TABLE IF NOT EXISTS purge_live(blob_id BLOB PRIMARY KEY)")
+        .execute(&mut **transaction)
+        .await?;
+    sqlx::query("DELETE FROM purge_live")
+        .execute(&mut **transaction)
+        .await?;
+    sqlx::query(
+        "INSERT OR IGNORE INTO purge_live
+         SELECT blob_id FROM purge_blobs
+         WHERE blob_id IN (SELECT blob_id FROM cursor_run_trace_artifacts)",
+    )
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "INSERT OR IGNORE INTO purge_live
+         SELECT e.child_blob_id FROM blob_edges e
+         WHERE e.child_blob_id IN (SELECT blob_id FROM purge_blobs)
+           AND e.parent_blob_id NOT IN (SELECT blob_id FROM purge_blobs)",
+    )
+    .execute(&mut **transaction)
+    .await?;
+    // Descendants of a live blob must live too; iterate until it settles.
+    loop {
+        let added = sqlx::query(
+            "INSERT OR IGNORE INTO purge_live
+             SELECT e.child_blob_id FROM blob_edges e
+             JOIN purge_live l ON e.parent_blob_id = l.blob_id
+             WHERE e.child_blob_id IN (SELECT blob_id FROM purge_blobs)",
+        )
+        .execute(&mut **transaction)
+        .await?
+        .rows_affected();
+        if added == 0 {
+            break;
+        }
+    }
+
+    sqlx::query(
+        "DELETE FROM blob_edges
+         WHERE (parent_blob_id IN (SELECT blob_id FROM purge_blobs WHERE blob_id NOT IN (SELECT blob_id FROM purge_live))
+             OR child_blob_id IN (SELECT blob_id FROM purge_blobs WHERE blob_id NOT IN (SELECT blob_id FROM purge_live)))",
+    )
+    .execute(&mut **transaction)
+    .await?;
+    let blobs = sqlx::query(
+        "DELETE FROM blobs
+         WHERE blob_id IN (SELECT blob_id FROM purge_blobs WHERE blob_id NOT IN (SELECT blob_id FROM purge_live))",
+    )
+    .execute(&mut **transaction)
+    .await?
+    .rows_affected();
+
+    sqlx::query("DROP TABLE purge_blobs")
+        .execute(&mut **transaction)
+        .await?;
+    sqlx::query("DROP TABLE purge_live")
+        .execute(&mut **transaction)
+        .await?;
+    Ok(blobs)
 }
 
 /// Cursor wraps the typed prompt in `<user_query>` inside a larger context block,
@@ -307,4 +433,113 @@ fn short_preview(text: String) -> String {
         return trimmed.to_string();
     }
     trimmed.chars().take(117).collect::<String>() + "..."
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    /// Minimal schema for the blob graph: the real one comes from migrations,
+    /// but reclaim_blobs only reads these three tables.
+    async fn graph() -> sqlx::SqlitePool {
+        let options = SqliteConnectOptions::new()
+            .filename(":memory:")
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        for statement in [
+            "CREATE TABLE blobs(blob_id BLOB PRIMARY KEY, data BLOB NOT NULL, created_at_ms INTEGER NOT NULL)",
+            "CREATE TABLE blob_edges(parent_blob_id BLOB NOT NULL, child_blob_id BLOB NOT NULL, field_name TEXT NOT NULL)",
+            "CREATE TABLE cursor_run_trace_artifacts(request_id TEXT NOT NULL, seq INTEGER NOT NULL, blob_id BLOB NOT NULL)",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+        pool
+    }
+
+    fn id(byte: u8) -> Vec<u8> {
+        vec![byte; 32]
+    }
+
+    async fn blob(pool: &sqlx::SqlitePool, value: u8) {
+        sqlx::query("INSERT INTO blobs(blob_id, data, created_at_ms) VALUES (?, ?, 0)")
+            .bind(id(value))
+            .bind(vec![value])
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    async fn edge(pool: &sqlx::SqlitePool, parent: u8, child: u8) {
+        sqlx::query("INSERT INTO blob_edges(parent_blob_id, child_blob_id, field_name) VALUES (?, ?, 'x')")
+            .bind(id(parent))
+            .bind(id(child))
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    async fn exists(pool: &sqlx::SqlitePool, value: u8) -> bool {
+        let found: Option<i64> = sqlx::query_scalar("SELECT 1 FROM blobs WHERE blob_id = ?")
+            .bind(id(value))
+            .fetch_optional(pool)
+            .await
+            .unwrap();
+        found.is_some()
+    }
+
+    #[tokio::test]
+    async fn reclaims_unreferenced_blobs_only() {
+        let pool = graph().await;
+        for value in [1, 2, 3] {
+            blob(&pool, value).await;
+        }
+        // The purged conversation cited 1; another chat's artifact still cites 2,
+        // and 2 embeds 3.
+        sqlx::query("INSERT INTO cursor_run_trace_artifacts(request_id, seq, blob_id) VALUES ('keep', 0, ?1)")
+            .bind(id(2))
+            .execute(&pool)
+            .await
+            .unwrap();
+        edge(&pool, 2, 3).await;
+
+        let mut transaction = pool.begin().await.unwrap();
+        let removed = reclaim_blobs(&mut transaction, &[id(1), id(2), id(3)])
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+
+        assert_eq!(removed, 1, "only the unshared blob goes");
+        assert!(!exists(&pool, 1).await);
+        assert!(exists(&pool, 2).await, "still cited by a live artifact");
+        assert!(exists(&pool, 3).await, "reachable from a live blob");
+    }
+
+    #[tokio::test]
+    async fn keeps_blob_embedded_by_a_surviving_parent() {
+        let pool = graph().await;
+        blob(&pool, 1).await;
+        blob(&pool, 9).await;
+        // Blob 1 is shared content: a blob outside the candidate set embeds it.
+        edge(&pool, 9, 1).await;
+
+        let mut transaction = pool.begin().await.unwrap();
+        let removed = reclaim_blobs(&mut transaction, &[id(1)]).await.unwrap();
+        transaction.commit().await.unwrap();
+
+        assert_eq!(removed, 0);
+        assert!(exists(&pool, 1).await);
+    }
+
+    #[tokio::test]
+    async fn empty_candidate_set_is_a_no_op() {
+        let pool = graph().await;
+        let mut transaction = pool.begin().await.unwrap();
+        assert_eq!(reclaim_blobs(&mut transaction, &[]).await.unwrap(), 0);
+        transaction.commit().await.unwrap();
+    }
 }

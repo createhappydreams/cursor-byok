@@ -532,7 +532,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 215,
+          "line": 217,
           "column": 12
         }
       ]
@@ -781,7 +781,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 285,
+          "line": 287,
           "column": 57
         }
       ]
@@ -976,7 +976,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 296,
+          "line": 298,
           "column": 63
         }
       ]
@@ -1174,7 +1174,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 223,
+          "line": 225,
           "column": 42
         }
       ]
@@ -2210,7 +2210,7 @@
         },
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 233,
+          "line": 235,
           "column": 38
         }
       ]
@@ -2239,7 +2239,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 194,
+          "line": 196,
           "column": 20
         }
       ]
@@ -2268,7 +2268,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 221,
+          "line": 223,
           "column": 41
         }
       ]
@@ -2873,7 +2873,7 @@
       "refs": [
         {
           "file": "shared/api.ts",
-          "line": 588,
+          "line": 590,
           "column": 43
         }
       ]
@@ -3041,7 +3041,7 @@
         },
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 222,
+          "line": 224,
           "column": 41
         }
       ]
@@ -3104,7 +3104,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 220,
+          "line": 222,
           "column": 18
         }
       ]
@@ -3176,7 +3176,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 271,
+          "line": 273,
           "column": 26
         }
       ]
@@ -3229,7 +3229,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 257,
+          "line": 259,
           "column": 69
         }
       ]
@@ -3277,7 +3277,7 @@
       "refs": [
         {
           "file": "shared/api.ts",
-          "line": 583,
+          "line": 585,
           "column": 43
         }
       ]
@@ -3301,7 +3301,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 279,
+          "line": 281,
           "column": 72
         }
       ]
@@ -3659,6 +3659,18 @@
         }
       ]
     },
+    "87417ab316c972b2": {
+      "source": "次模型调用",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 191,
+          "column": 81
+        }
+      ]
+    },
     "878a8ab176429a86": {
       "source": "查看说明",
       "kind": "text",
@@ -3690,7 +3702,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 279,
+          "line": 281,
           "column": 61
         }
       ]
@@ -5218,7 +5230,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 255,
+          "line": 257,
           "column": 77
         }
       ]
@@ -5282,7 +5294,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 215,
+          "line": 217,
           "column": 27
         }
       ]
@@ -6259,7 +6271,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 288,
+          "line": 290,
           "column": 26
         }
       ]
@@ -6614,6 +6626,18 @@
         }
       ]
     },
+    "f7b08e0126a6dd25": {
+      "source": "个内容块",
+      "kind": "text",
+      "placeholders": [],
+      "refs": [
+        {
+          "file": "features/conversations/ConversationsPage.tsx",
+          "line": 193,
+          "column": 42
+        }
+      ]
+    },
     "f85537d1fd2ef6f6": {
       "source": "自定义概览筛选",
       "kind": "text",
@@ -6695,7 +6719,7 @@
       "refs": [
         {
           "file": "features/conversations/ConversationsPage.tsx",
-          "line": 304,
+          "line": 306,
           "column": 14
         },
         {

@@ -71,39 +71,18 @@ impl Store {
     async fn clear_trace_artifacts_tx(
         transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     ) -> Result<()> {
-        sqlx::query(
-            "CREATE TEMP TABLE IF NOT EXISTS clear_statistics_blob_ids(
-                blob_id BLOB PRIMARY KEY
-             )",
-        )
-        .execute(&mut **transaction)
-        .await?;
-        sqlx::query("DELETE FROM clear_statistics_blob_ids")
-            .execute(&mut **transaction)
-            .await?;
-        sqlx::query(
-            "INSERT OR IGNORE INTO clear_statistics_blob_ids(blob_id)
-             SELECT blob_id FROM cursor_run_trace_artifacts",
-        )
-        .execute(&mut **transaction)
-        .await?;
         sqlx::query("DELETE FROM cursor_run_trace_artifacts")
             .execute(&mut **transaction)
             .await?;
-        sqlx::query(
-            "DELETE FROM blobs
-             WHERE blob_id IN (SELECT blob_id FROM clear_statistics_blob_ids)
-               AND NOT EXISTS (
-                   SELECT 1 FROM cursor_run_trace_artifacts a WHERE a.blob_id = blobs.blob_id
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM blob_edges e
-                   WHERE e.parent_blob_id = blobs.blob_id OR e.child_blob_id = blobs.blob_id
-               )",
-        )
-        .execute(&mut **transaction)
-        .await?;
-        sqlx::query("DROP TABLE clear_statistics_blob_ids")
+        // Trace artifacts are the only rows that cite blobs. With every artifact
+        // gone, the whole content-addressed store is garbage: leaving the blobs
+        // (and their edges) behind kept the raw request/response bytes on disk
+        // for as long as the age-based retention sweep, which is what let a
+        // cleared statistics page leave a hundred megabytes behind.
+        sqlx::query("DELETE FROM blob_edges")
+            .execute(&mut **transaction)
+            .await?;
+        sqlx::query("DELETE FROM blobs")
             .execute(&mut **transaction)
             .await?;
         Ok(())

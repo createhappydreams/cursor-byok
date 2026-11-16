@@ -188,7 +188,9 @@ export function ConversationsPage() {
           t("本地已删") +
             ` · ${report.local.messages} ${t("条消息")} / ${report.local.checkpoints} ${t(
               "个快照",
-            )} / ${report.local.runs} ${t("次运行")}`,
+            )} / ${report.local.runs} ${t("次运行")} / ${report.local.llm_calls} ${t(
+              "次模型调用",
+            )} / ${report.local.blobs} ${t("个内容块")}`,
         );
       } else {
         lines.push(t("本地无数据"));
