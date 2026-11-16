@@ -74,11 +74,21 @@ mod tests {
         );
     }
 
+    /// A client that ignores environment and system proxies: transport-failure
+    /// tests connect to loopback ports they control, and a developer proxy on
+    /// the machine would swallow the connection failure.
+    fn direct_client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("client")
+    }
+
     #[tokio::test]
     async fn response_body_transport_failure_is_one_failed_attempt() {
         let url =
             server(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 100\r\n\r\nshort").await;
-        let client = reqwest::Client::new();
+        let client = direct_client();
         let error = send_once("test", || client.get(&url), &CancellationToken::new(), None)
             .await
             .unwrap_err();
@@ -91,7 +101,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         drop(listener);
         let url = format!("http://{address}");
-        let client = reqwest::Client::new();
+        let client = direct_client();
         let error = send_once("test", || client.get(&url), &CancellationToken::new(), None)
             .await
             .unwrap_err();
