@@ -6,13 +6,16 @@ use serde_json::Value;
 use crate::{cursor::services::server_config, Error, Result};
 
 const NO_PROXY_KEY: &str = "http.noProxy";
-const KEYS: [&str; 5] = [
-    "http.proxy",
-    "http.proxyKerberosServicePrincipal",
-    "http.proxySupport",
-    "cursor.general.disableHttp2",
-    "http.experimental.systemCertificatesV2",
-];
+const PROXY_KEY: &str = "http.proxy";
+const PROXY_SUPPORT_KEY: &str = "http.proxySupport";
+const DISABLE_HTTP2_KEY: &str = "cursor.general.disableHttp2";
+const SYSTEM_CERTS_KEY: &str = "http.experimental.systemCertificatesV2";
+/// Keys this application manages and rewrites on every start.
+const KEYS: [&str; 4] = [PROXY_KEY, PROXY_SUPPORT_KEY, DISABLE_HTTP2_KEY, SYSTEM_CERTS_KEY];
+/// `http.proxyKerberosServicePrincipal` holds an SPN (`HTTP/proxy`), not a proxy URL.
+/// Earlier builds wrote the URL here, which is not a valid value for the key, so it
+/// is dropped whenever the managed block is written or cleared.
+const STALE_KEYS: [&str; 1] = ["http.proxyKerberosServicePrincipal"];
 
 /// The workspace applies this setting locally when the proxy is enabled, and a local
 /// `true` overrides whatever `GetServerConfigResponse` asks for. Track the same
@@ -70,18 +73,23 @@ fn write(settings: &BTreeMap<String, Value>) -> Result<()> {
 pub fn write_proxy_settings(proxy_url: &str) -> Result<()> {
     let mut settings = read()?;
     settings.remove(NO_PROXY_KEY);
-    settings.insert(KEYS[0].into(), Value::String(proxy_url.into()));
-    settings.insert(KEYS[1].into(), Value::String(proxy_url.into()));
-    settings.insert(KEYS[2].into(), Value::String("on".into()));
-    settings.insert(KEYS[3].into(), Value::Bool(managed_disable_http2()));
-    settings.insert(KEYS[4].into(), Value::Bool(true));
+    for key in STALE_KEYS {
+        settings.remove(key);
+    }
+    settings.insert(PROXY_KEY.into(), Value::String(proxy_url.into()));
+    settings.insert(PROXY_SUPPORT_KEY.into(), Value::String("on".into()));
+    settings.insert(
+        DISABLE_HTTP2_KEY.into(),
+        Value::Bool(managed_disable_http2()),
+    );
+    settings.insert(SYSTEM_CERTS_KEY.into(), Value::Bool(true));
     write(&settings)
 }
 
 pub fn clear_proxy_settings() -> Result<()> {
     let mut settings = read()?;
     let before = settings.len();
-    for key in KEYS {
+    for key in KEYS.into_iter().chain(STALE_KEYS) {
         settings.remove(key);
     }
     if settings.len() != before {
@@ -93,21 +101,20 @@ pub fn clear_proxy_settings() -> Result<()> {
 pub fn settings_match(proxy_url: &str) -> Result<bool> {
     let settings = read()?;
     Ok(
-        settings.get(KEYS[0]) == Some(&Value::String(proxy_url.into()))
-            && settings.get(KEYS[1]) == Some(&Value::String(proxy_url.into()))
-            && settings.get(KEYS[2]) == Some(&Value::String("on".into()))
-            && settings.get(KEYS[3]) == Some(&Value::Bool(managed_disable_http2()))
-            && settings.get(KEYS[4]) == Some(&Value::Bool(true)),
+        settings.get(PROXY_KEY) == Some(&Value::String(proxy_url.into()))
+            && settings.get(PROXY_SUPPORT_KEY) == Some(&Value::String("on".into()))
+            && settings.get(DISABLE_HTTP2_KEY) == Some(&Value::Bool(managed_disable_http2()))
+            && settings.get(SYSTEM_CERTS_KEY) == Some(&Value::Bool(true)),
     )
 }
 
 pub fn clear_stale_managed_settings() -> Result<()> {
     let settings = read()?;
-    let managed_signature = settings.get(KEYS[2]) == Some(&Value::String("on".into()))
-        && settings.get(KEYS[3]) == Some(&Value::Bool(managed_disable_http2()))
-        && settings.get(KEYS[4]) == Some(&Value::Bool(true));
+    let managed_signature = settings.get(PROXY_SUPPORT_KEY) == Some(&Value::String("on".into()))
+        && settings.get(DISABLE_HTTP2_KEY) == Some(&Value::Bool(managed_disable_http2()))
+        && settings.get(SYSTEM_CERTS_KEY) == Some(&Value::Bool(true));
     let loopback = settings
-        .get(KEYS[0])
+        .get(PROXY_KEY)
         .and_then(Value::as_str)
         .and_then(|value| value.parse::<reqwest::Url>().ok())
         .and_then(|url| url.host_str().map(str::to_owned))

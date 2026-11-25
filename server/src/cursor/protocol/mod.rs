@@ -3,4 +3,5 @@
 pub mod connect;
 pub mod events;
 pub mod json_stream;
+pub mod lenient;
 pub mod proto;

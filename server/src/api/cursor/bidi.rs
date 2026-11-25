@@ -6,6 +6,7 @@ use crate::{
         conversation::TransportCommand,
         protocol::{
             events,
+            lenient,
             proto::{agent::v1 as agent, aiserver::v1 as ai},
         },
         transport::{TransportParent, TransportRegistry},
@@ -176,8 +177,32 @@ pub fn decode(request: &ai::BidiAppendRequest) -> Result<DecodedAppend> {
     Ok(DecodedAppend {
         request_id: request_id.into(),
         seqno: request.append_seqno,
-        message: agent::AgentClientMessage::decode(payload.as_slice())?,
+        message: decode_message(&payload)?,
     })
+}
+
+/// Decodes the client message, falling back to the tolerant path when the vendored
+/// schema no longer matches the agent harness that produced the bytes.
+///
+/// A drift in one nested field used to fail the whole append with
+/// `INVALID_ARGUMENT`, which the client reports as "The server failed 4 times" and
+/// retries four times before giving up. The fallback keeps the fields that still
+/// decode, so the run proceeds with slightly less state instead of not at all.
+fn decode_message(payload: &[u8]) -> Result<agent::AgentClientMessage> {
+    match agent::AgentClientMessage::decode(payload) {
+        Ok(message) => Ok(message),
+        Err(error) => match lenient::decode_client_message(payload, &error.to_string()) {
+            Some(message) => {
+                tracing::warn!(
+                    error = %error,
+                    len = payload.len(),
+                    "bidi: agent harness schema drift, decoded with the tolerant path"
+                );
+                Ok(message)
+            }
+            None => Err(error.into()),
+        },
+    }
 }
 
 pub async fn append(
