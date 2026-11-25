@@ -24,12 +24,7 @@ impl CheckpointBuilder {
     ) -> Result<Vec<BlobId>> {
         self.ensure_turn(mode).await?;
         let Some(turn) = self.turn.as_mut() else {
-            return self
-                .base
-                .turns
-                .iter()
-                .map(|id| BlobId::from_bytes(id))
-                .collect();
+            return Ok(blob_ids(&self.base.turns, "base turn"));
         };
         let changed = !presentation.steps.is_empty();
         for step in &presentation.steps {
@@ -75,12 +70,7 @@ impl CheckpointBuilder {
             return Ok(());
         }
         self.turns_initialized = true;
-        let base_ids = self
-            .base
-            .turns
-            .iter()
-            .map(|id| BlobId::from_bytes(id))
-            .collect::<Result<Vec<_>>>()?;
+        let base_ids = blob_ids(&self.base.turns, "base turn");
         if let Some(mut user) = self.turn_user.clone() {
             user.mode = mode;
             let mut encoded = Vec::new();
@@ -123,5 +113,41 @@ impl CheckpointBuilder {
             current,
         });
         Ok(())
+    }
+}
+
+/// Turns a list of raw ids from `conversation_state` into blob ids, dropping the ones
+/// that are not ids at all.
+///
+/// A newer harness can change what it stores in `turns`; the ids it sends are then no
+/// longer 32 bytes. Failing the whole run over one unreadable entry would defeat the
+/// tolerant decode path, which is why the rest of the list is kept.
+fn blob_ids(raw: &[Vec<u8>], what: &str) -> Vec<BlobId> {
+    raw.iter()
+        .filter_map(|bytes| match BlobId::from_bytes(bytes) {
+            Ok(id) => Some(id),
+            Err(error) => {
+                tracing::warn!(%error, what, "checkpoint: dropping unreadable blob id");
+                None
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keeps_valid_ids_and_drops_the_rest() {
+        let valid = vec![7u8; 32];
+        let ids = blob_ids(&[valid.clone(), vec![1, 2, 3], vec![]], "base turn");
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0].as_bytes(), valid.as_slice());
+    }
+
+    #[test]
+    fn an_entirely_unreadable_list_is_empty_not_fatal() {
+        assert!(blob_ids(&[b"json".to_vec(), vec![0xff; 40]], "base turn").is_empty());
     }
 }

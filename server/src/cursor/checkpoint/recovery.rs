@@ -32,17 +32,38 @@ impl CheckpointBuilder {
             return Ok(messages);
         };
         for (ordinal, raw_id) in state.root_prompt_messages_json.iter().enumerate() {
-            let id = BlobId::from_bytes(raw_id)?;
-            let Some(data) = self.sync.get(&id).await? else {
-                return Err(Error::Protocol(format!(
-                    "missing message Blob {}",
-                    id.to_base64()
-                )));
+            // A harness whose schema moved on can hand us blob ids we no longer have,
+            // or ids that are not ids at all. Skipping one message keeps the rest of
+            // the history; failing here would turn a partial state into a 400 and
+            // take the whole run down, which is exactly what the tolerant decode path
+            // is meant to prevent.
+            let id = match BlobId::from_bytes(raw_id) {
+                Ok(id) => id,
+                Err(error) => {
+                    tracing::warn!(ordinal, %error, "hydrate: dropping unreadable root message id");
+                    continue;
+                }
             };
-            messages.push(messages::decode(
+            let Some(data) = self.sync.get(&id).await? else {
+                tracing::warn!(
+                    ordinal,
+                    blob = %id.to_base64(),
+                    "hydrate: dropping a root message whose blob this server does not have"
+                );
+                continue;
+            };
+            match messages::decode(
                 &data,
                 format!("cursor-root:{}:{ordinal}", id.to_base64()),
-            )?);
+            ) {
+                Ok(message) => messages.push(message),
+                Err(error) => tracing::warn!(
+                    ordinal,
+                    blob = %id.to_base64(),
+                    %error,
+                    "hydrate: dropping a root message that no longer decodes"
+                ),
+            }
         }
         Ok(messages)
     }
