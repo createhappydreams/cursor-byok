@@ -14,6 +14,16 @@ use crate::{api::cursor::proxy, Error, Result};
 
 pub const BOOTSTRAP_STATSIG_PATH: &str = "/aiserver.v1.AnalyticsService/BootstrapStatsig";
 const AGENT_RETRIES_GATE: &str = "nal_agent_retries";
+/// Cursor's renderer picks the agent runtime with
+/// `checkFeatureGate("agent_host_local_loop") ? "agent_host_local_loop" : "agent_host"`
+/// (see `V1r` in the workbench bundle). On the local-loop runtime the harness speaks
+/// `aiserver.v1.InferenceService/RunInference` (bidi) for the server->client stream and
+/// pushes `RunInferenceRunRequest` frames through `BidiAppend`. This server implements
+/// the `agent.v1.AgentService` runtime instead (`Run`/`RunSSE` + `BidiAppend`), so the
+/// gate has to stay closed: with it open the run starts, the model answers, and every
+/// frame is written to a stream nobody reads, which is what the client reports as
+/// "No first token received within Ns".
+const LOCAL_LOOP_GATE: &str = "agent_host_local_loop";
 const LOCAL_RULE: &str = "local_enabled";
 
 #[derive(Clone, PartialEq, Message)]
@@ -51,7 +61,7 @@ fn patch_upstream(response: proxy::BufferedResponse) -> Result<Response<Body>> {
     let (framed, payload) = unary_payload(&response.body)?;
     let mut message = BootstrapStatsigResponse::decode(payload)?;
     let mut config = serde_json::from_str::<Value>(&message.config)?;
-    enable_agent_retries(&mut config)?;
+    patch_gates(&mut config)?;
     message.config = serde_json::to_string(&config)?;
     Ok(response.with_body(encode_unary(&message, framed)))
 }
@@ -74,7 +84,7 @@ fn local_response() -> Result<Response<Body>> {
         },
         "time": generated_at_ms
     });
-    enable_agent_retries(&mut config)?;
+    patch_gates(&mut config)?;
     let message = BootstrapStatsigResponse {
         config: serde_json::to_string(&config)?,
         generated_at_ms,
@@ -96,8 +106,12 @@ fn local_response() -> Result<Response<Body>> {
     Ok(response)
 }
 
-fn enable_agent_retries(config: &mut Value) -> Result<()> {
-    let gate_key = statsig_key(config, AGENT_RETRIES_GATE);
+/// Forces the two gates this server depends on: agent retries stay on, and the
+/// local-loop agent runtime stays off so the harness keeps using the
+/// `agent.v1.AgentService` stream this server serves.
+fn patch_gates(config: &mut Value) -> Result<()> {
+    let retries_key = statsig_key(config, AGENT_RETRIES_GATE);
+    let local_loop_key = statsig_key(config, LOCAL_LOOP_GATE);
     let root = config
         .as_object_mut()
         .ok_or_else(|| Error::Protocol("Statsig bootstrap config must be an object".into()))?;
@@ -106,7 +120,13 @@ fn enable_agent_retries(config: &mut Value) -> Result<()> {
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
         .ok_or_else(|| Error::Protocol("Statsig feature_gates must be an object".into()))?;
-    gates.insert(gate_key.clone(), enabled_gate(&gate_key));
+    gates.insert(retries_key.clone(), gate(&retries_key, true));
+    gates.insert(local_loop_key.clone(), gate(&local_loop_key, false));
+    tracing::info!(
+        agent_retries_gate = %retries_key,
+        local_loop_gate = %local_loop_key,
+        "patched Statsig gates: agent retries on, local-loop agent runtime off"
+    );
     Ok(())
 }
 
@@ -127,10 +147,10 @@ fn djb2(value: &str) -> String {
         .to_string()
 }
 
-fn enabled_gate(name: &str) -> Value {
+fn gate(name: &str, value: bool) -> Value {
     json!({
         "name": name,
-        "value": true,
+        "value": value,
         "rule_id": LOCAL_RULE,
         "ruleID": LOCAL_RULE,
         "group_name": LOCAL_RULE,
