@@ -216,6 +216,41 @@ impl CursorToolRuntime {
             .map(|entry| entry.call.clone())
     }
 
+    /// Numeric exec id for a model tool-call id.
+    ///
+    /// Cursor 3.33 sends a UUID string where the schema says the id is a varint, so
+    /// the numeric id no longer arrives. The exec request already carries the model's
+    /// call id in `exec_id`, and the client echoes it, so that is the correlation key
+    /// that survives the drift.
+    pub async fn exec_id_for_call(&self, call_id: &str) -> Option<u32> {
+        if call_id.is_empty() {
+            return None;
+        }
+        self.execs
+            .lock()
+            .await
+            .iter()
+            .find(|(_, entry)| entry.call.call_id == call_id)
+            .map(|(id, _)| *id)
+    }
+
+    /// Resolves an interaction id, falling back to the only pending interaction.
+    ///
+    /// `InteractionResponse` has no string correlation field, so when its numeric id
+    /// is lost there is nothing to match on. Accepting the sole pending interaction is
+    /// right in practice: interactions are sequential (the agent waits for the answer
+    /// before it continues), so there is only ever one outstanding.
+    pub async fn interaction_id_or_sole(&self, id: u32) -> Option<u32> {
+        let interactions = self.interactions.lock().await;
+        if interactions.contains_key(&id) {
+            return Some(id);
+        }
+        if interactions.len() == 1 {
+            return interactions.keys().next().copied();
+        }
+        None
+    }
+
     pub async fn append_stdout(&self, id: u32, data: &str) -> bool {
         let mut entries = self.execs.lock().await;
         let Some(entry) = entries.get_mut(&id) else {

@@ -217,21 +217,29 @@ impl ToolDispatcher {
         &self,
         response: &pb::InteractionResponse,
     ) -> Result<ClientToolEvent> {
-        if self.runtime.is_interrupted(response.id).await {
+        // `InteractionResponse` has no string correlation field, so when the harness
+        // replaces its numeric id with a UUID there is nothing to match on. The agent
+        // waits for an answer before it continues, so exactly one interaction is
+        // pending; using it beats failing the whole turn.
+        let Some(id) = self.runtime.interaction_id_or_sole(response.id).await else {
+            tracing::warn!(
+                id = response.id,
+                "ignoring interaction response with no pending interaction to match"
+            );
+            return Ok(ClientToolEvent::Pending);
+        };
+        if self.runtime.is_interrupted(id).await {
             return Ok(ClientToolEvent::Pending);
         }
-        let pending = match self.runtime.take_interaction(response.id).await {
+        let pending = match self.runtime.take_interaction(id).await {
             Some(pending) => pending,
-            None if self.runtime.completed_call(response.id).await.is_some() => {
-                tracing::warn!(
-                    id = response.id,
-                    "ignoring duplicate terminal interaction response"
-                );
+            None if self.runtime.completed_call(id).await.is_some() => {
+                tracing::warn!(id, "ignoring duplicate terminal interaction response");
                 return Ok(ClientToolEvent::Pending);
             }
             None => {
                 tracing::warn!(
-                    id = response.id,
+                    id,
                     "ignoring response for unknown interaction"
                 );
                 return Ok(ClientToolEvent::Pending);

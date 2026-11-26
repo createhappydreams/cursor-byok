@@ -21,27 +21,60 @@ pub enum ClientExecEvent {
     Pending,
 }
 
+/// Finds the numeric id the runtime filed this response under.
+///
+/// The harness changed the wire type of `ExecClientMessage.id` from varint to a UUID
+/// string, so the number no longer arrives and the response cannot be matched by it.
+/// The request carries the model's call id in `exec_id` and the client echoes it, so
+/// that is the fallback key. When neither matches, the response is dropped with a
+/// warning: guessing would attach a result to the wrong tool call.
+async fn resolve_exec_id(
+    message: &pb::ExecClientMessage,
+    pending: &CursorToolRuntime,
+) -> Option<u32> {
+    if message.id != 0
+        && (pending.exec_call(message.id).await.is_some()
+            || pending.completed_call(message.id).await.is_some()
+            || pending.is_interrupted(message.id).await)
+    {
+        return Some(message.id);
+    }
+    if let Some(id) = pending.exec_id_for_call(&message.exec_id).await {
+        tracing::debug!(
+            exec_id = %message.exec_id,
+            id,
+            "exec result matched through exec_id"
+        );
+        return Some(id);
+    }
+    (message.id != 0).then_some(message.id)
+}
+
 pub async fn client_event(
     message: &pb::ExecClientMessage,
     pending: &CursorToolRuntime,
 ) -> Result<ClientExecEvent> {
-    if pending.is_interrupted(message.id).await {
+    let Some(id) = resolve_exec_id(message, pending).await else {
+        tracing::warn!(
+            exec_id = %message.exec_id,
+            "ignoring tool response with no usable correlation id"
+        );
+        return Ok(ClientExecEvent::Pending);
+    };
+    if pending.is_interrupted(id).await {
         if message.message.as_ref().is_some_and(is_terminal) {
-            pending.discard_exec(message.id).await;
+            pending.discard_exec(id).await;
         }
         return Ok(ClientExecEvent::Pending);
     }
-    let call = match pending.exec_call(message.id).await {
+    let call = match pending.exec_call(id).await {
         Some(call) => call,
-        None if pending.completed_call(message.id).await.is_some() => {
-            tracing::warn!(id = message.id, "ignoring duplicate terminal tool response");
+        None if pending.completed_call(id).await.is_some() => {
+            tracing::warn!(id, "ignoring duplicate terminal tool response");
             return Ok(ClientExecEvent::Pending);
         }
         None => {
-            tracing::warn!(
-                id = message.id,
-                "ignoring response for unknown tool execution"
-            );
+            tracing::warn!(id, "ignoring response for unknown tool execution");
             return Ok(ClientExecEvent::Pending);
         }
     };
@@ -49,7 +82,7 @@ pub async fn client_event(
         return Ok(ClientExecEvent::Pending);
     };
     let pb::exec_client_message::Message::ShellStream(stream) = wire_result else {
-        let entry = take(message.id, pending).await?;
+        let entry = take(id, pending).await?;
         return match entry.stage {
             ExecStage::EditRead => advance_edit(entry, wire_result, pending).await,
             ExecStage::Direct | ExecStage::DynamicMcp(_) | ExecStage::EditWrite(_) => {
@@ -60,14 +93,14 @@ pub async fn client_event(
     use pb::shell_stream::Event;
     let event = match &stream.event {
         Some(Event::Stdout(stdout)) => {
-            if pending.append_stdout(message.id, &stdout.data).await {
+            if pending.append_stdout(id, &stdout.data).await {
                 ClientExecEvent::Delta(Box::new(shell_delta(&call, true, &stdout.data)))
             } else {
                 ClientExecEvent::Pending
             }
         }
         Some(Event::Stderr(stderr)) => {
-            if pending.append_stderr(message.id, &stderr.data).await {
+            if pending.append_stderr(id, &stderr.data).await {
                 ClientExecEvent::Delta(Box::new(shell_delta(&call, false, &stderr.data)))
             } else {
                 ClientExecEvent::Pending
@@ -75,12 +108,12 @@ pub async fn client_event(
         }
         Some(Event::Start(_)) | Some(Event::HookContext(_)) => ClientExecEvent::Pending,
         Some(Event::Exit(exit)) => {
-            let entry = take(message.id, pending).await?;
+            let entry = take(id, pending).await?;
             let result = shell_exit_result(message, exit, &entry.stdout, &entry.stderr);
             completed(entry, pb::exec_client_message::Message::ShellResult(result))?
         }
         Some(Event::Backgrounded(backgrounded)) => {
-            let entry = take(message.id, pending).await?;
+            let entry = take(id, pending).await?;
             let result = shell_backgrounded_result(
                 backgrounded,
                 &entry.stdout,
@@ -95,7 +128,7 @@ pub async fn client_event(
                 ..Default::default()
             };
             complete(
-                message.id,
+                id,
                 pending,
                 pb::exec_client_message::Message::ShellResult(result),
             )
@@ -107,7 +140,7 @@ pub async fn client_event(
                 ..Default::default()
             };
             complete(
-                message.id,
+                id,
                 pending,
                 pb::exec_client_message::Message::ShellResult(result),
             )
@@ -123,7 +156,7 @@ pub async fn client_event(
                 ..Default::default()
             };
             complete(
-                message.id,
+                id,
                 pending,
                 pb::exec_client_message::Message::ShellResult(result),
             )

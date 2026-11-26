@@ -172,6 +172,8 @@ pub struct SalvageReport {
     pub kept: usize,
     pub failed_at: Option<usize>,
     pub strict_error: Option<String>,
+    /// Which `AgentClientMessage` member the payload carried.
+    pub kind: Option<String>,
 }
 
 impl SalvageReport {
@@ -256,20 +258,55 @@ fn salvage_run_request(raw: &[u8]) -> (Option<agent::AgentRunRequest>, SalvageRe
 
     let mut rebuilt: Vec<u8> = Vec::with_capacity(raw.len());
     for field in &walked.fields {
+        let payload = field.payload(raw);
+        // Messages that carry what the run needs get their own salvage pass, so one
+        // drifted field inside them does not cost the whole object: losing
+        // `mcp_tools` means the model is offered no MCP tools at all, and losing
+        // `model_details` breaks routing.
         if field.number == 1 && field.wire_type == 2 {
-            let (state, state_report) = salvage_state(field.payload(raw));
+            // The state is the big one: keep its own dropped-field ledger.
+            let (state, state_report) = salvage_state(payload);
             report.merge(state_report);
             match state {
                 Some(state) => {
-                    // Keep the field but with only the parts we could decode.
-                    let tag = (1u32 << 3) | 2;
-                    push_varint(&mut rebuilt, u64::from(tag));
-                    push_varint(&mut rebuilt, state.encoded_len() as u64);
-                    state.encode(&mut rebuilt).ok();
+                    let encoded = encode_message(&state);
+                    push_varint(&mut rebuilt, u64::from((1u32 << 3) | 2));
+                    push_varint(&mut rebuilt, encoded.len() as u64);
+                    rebuilt.extend_from_slice(&encoded);
                     report.kept += 1;
                 }
-                None => report.dropped.push("run_request.#1: conversation_state".into()),
+                None => report
+                    .dropped
+                    .push("run_request.#1: conversation_state".into()),
             }
+            continue;
+        }
+        let nested: Option<(u32, Vec<u8>)> = match field.number {
+            2 => salvage_member::<agent::ConversationAction>(payload, "action")
+                .map(|value| (2, encode_message(&value))),
+            3 => salvage_member::<agent::ModelDetails>(payload, "model_details")
+                .map(|value| (3, encode_message(&value))),
+            4 => salvage_member::<agent::McpTools>(payload, "mcp_tools")
+                .map(|value| (4, encode_message(&value))),
+            7 => salvage_member::<agent::SkillOptions>(payload, "skill_options")
+                .map(|value| (7, encode_message(&value))),
+            9 => salvage_member::<agent::RequestedModel>(payload, "requested_model")
+                .map(|value| (9, encode_message(&value))),
+            17 => salvage_member::<agent::PreFetchedBlob>(payload, "prefetched_blob")
+                .map(|value| (17, encode_message(&value))),
+            _ => None,
+        };
+        if let Some((number, encoded)) = nested {
+            push_varint(&mut rebuilt, u64::from((number << 3) | 2));
+            push_varint(&mut rebuilt, encoded.len() as u64);
+            rebuilt.extend_from_slice(&encoded);
+            report.kept += 1;
+            continue;
+        }
+        if matches!(field.number, 2 | 3 | 4 | 7 | 9 | 17) && field.wire_type == 2 {
+            report
+                .dropped
+                .push(format!("run_request.#{}: unreadable message", field.number));
             continue;
         }
         let slice = &raw[field.start..field.end];
@@ -289,6 +326,13 @@ fn salvage_run_request(raw: &[u8]) -> (Option<agent::AgentRunRequest>, SalvageRe
     (agent::AgentRunRequest::decode(rebuilt.as_slice()).ok(), report)
 }
 
+/// Serializes a salvaged message back into wire bytes for its parent.
+fn encode_message<M: Message>(message: &M) -> Vec<u8> {
+    let mut out = Vec::with_capacity(message.encoded_len());
+    message.encode(&mut out).ok();
+    out
+}
+
 fn push_varint(out: &mut Vec<u8>, mut value: u64) {
     loop {
         let byte = (value & 0x7f) as u8;
@@ -303,6 +347,12 @@ fn push_varint(out: &mut Vec<u8>, mut value: u64) {
 
 /// Decodes an `AgentClientMessage` that the strict path rejected.
 ///
+/// Every `oneof` member gets the same field-by-field treatment, not just the run
+/// request: a harness that changes `uint32 id` into a UUID string breaks the exec
+/// result, the stream close and the interaction response too, and each of those is
+/// sent after the run has already started. Salvaging one member but not the others
+/// only moves the 400 a few hundred milliseconds later.
+///
 /// Returns `None` when nothing usable survived, in which case the caller keeps its
 /// original error: a payload that is not a client message at all should still fail.
 pub fn decode_client_message(raw: &[u8], strict_error: &str) -> Option<agent::AgentClientMessage> {
@@ -316,32 +366,84 @@ pub fn decode_client_message(raw: &[u8], strict_error: &str) -> Option<agent::Ag
         ..Default::default()
     };
     let mut message: Option<agent::AgentClientMessage> = None;
+    let mut kind = "unknown";
 
     for field in &walked.fields {
-        if field.number == 1 && field.wire_type == 2 {
-            let (request, request_report) = salvage_run_request(field.payload(raw));
-            report.merge(request_report);
-            if let Some(request) = request {
-                message = Some(agent::AgentClientMessage {
-                    message: Some(agent::agent_client_message::Message::RunRequest(request)),
-                });
+        let payload = field.payload(raw);
+        let member = match (field.number, field.wire_type) {
+            (1, 2) => {
+                kind = "run_request";
+                salvage_run_request(payload)
+                    .0
+                    .map(agent::agent_client_message::Message::RunRequest)
             }
-            continue;
-        }
-        // Other client message kinds (exec results, kv, heartbeats) are small and
-        // have not drifted; one that fails is simply dropped.
-        let slice = &raw[field.start..field.end];
-        if agent::AgentClientMessage::decode(slice).is_err() {
-            report
-                .dropped
-                .push(format!("client.#{}: undecodable", field.number));
+            // The result-carrying members share the same shape of drift: `id` is a
+            // varint in the vendored schema and a UUID string in the harness, and one
+            // bad field used to take the whole member with it.
+            (2, 2) => {
+                kind = "exec_client_message";
+                salvage_member::<agent::ExecClientMessage>(payload, "exec")
+                    .map(agent::agent_client_message::Message::ExecClientMessage)
+            }
+            (5, 2) => {
+                kind = "exec_client_control_message";
+                salvage_member::<agent::ExecClientControlMessage>(payload, "control")
+                    .map(agent::agent_client_message::Message::ExecClientControlMessage)
+            }
+            (6, 2) => {
+                kind = "interaction_response";
+                salvage_member::<agent::InteractionResponse>(payload, "interaction")
+                    .map(agent::agent_client_message::Message::InteractionResponse)
+            }
+            (3, 2) => {
+                kind = "kv_client_message";
+                salvage_member::<agent::KvClientMessage>(payload, "kv")
+                    .map(agent::agent_client_message::Message::KvClientMessage)
+            }
+            (4, 2) => {
+                kind = "conversation_action";
+                salvage_member::<agent::ConversationAction>(payload, "action")
+                    .map(agent::agent_client_message::Message::ConversationAction)
+            }
+            (7, 2) => {
+                kind = "client_heartbeat";
+                salvage_member::<agent::ClientHeartbeat>(payload, "heartbeat")
+                    .map(agent::agent_client_message::Message::ClientHeartbeat)
+            }
+            (8, 2) => {
+                kind = "prewarm_request";
+                salvage_member::<agent::PrewarmRequest>(payload, "prewarm")
+                    .map(agent::agent_client_message::Message::PrewarmRequest)
+            }
+            _ => {
+                report
+                    .dropped
+                    .push(format!("client.#{}: unknown member", field.number));
+                None
+            }
+        };
+        if let Some(member) = member {
+            // One message per append; the last decodable member wins, which matches
+            // the oneof semantics of the wire format.
+            message = Some(agent::AgentClientMessage {
+                message: Some(member),
+            });
         }
     }
 
     if let Some(message) = &message {
+        report.kind = Some(kind.to_string());
         write_dump(raw, &report, message);
     }
     message
+}
+
+/// Field-by-field recovery for a plain message: keeps what decodes, drops the rest.
+fn salvage_member<M>(raw: &[u8], level: &str) -> Option<M>
+where
+    M: Message + Default,
+{
+    salvage::<M>(raw, level).0
 }
 
 /// Writes one text file per salvaged payload so the next drift is diagnosable
@@ -365,8 +467,9 @@ fn write_dump(raw: &[u8], report: &SalvageReport, message: &agent::AgentClientMe
 
     let mut out = String::new();
     out.push_str(&format!(
-        "harness={}\nlen={}\nsha256={}\n",
+        "harness={}\nkind={}\nlen={}\nsha256={}\n",
         harness_version().unwrap_or_else(|| "unknown".into()),
+        report.kind.as_deref().unwrap_or("unknown"),
         raw.len(),
         hex::encode(digest)
     ));
@@ -401,6 +504,18 @@ fn write_dump(raw: &[u8], report: &SalvageReport, message: &agent::AgentClientMe
                 .as_ref()
                 .map_or(0, |state| state.root_prompt_messages_json.len()),
         ));
+    }
+    // For results the interesting question is whether a correlation key survived.
+    if let Some(agent::agent_client_message::Message::ExecClientMessage(exec)) = &message.message {
+        out.push_str(&format!(
+            "exec_numeric_id={}\nexec_id={}\n",
+            exec.id, exec.exec_id
+        ));
+    }
+    if let Some(agent::agent_client_message::Message::InteractionResponse(response)) =
+        &message.message
+    {
+        out.push_str(&format!("interaction_numeric_id={}\n", response.id));
     }
     let _ = std::fs::write(&path, out);
     tracing::warn!(
@@ -478,6 +593,45 @@ mod tests {
         let mut request = wrap(1, &state);
         request.extend_from_slice(&wrap(5, b"conv-1"));
         wrap(1, &request)
+    }
+
+    #[test]
+    fn recovers_an_exec_result_whose_id_became_a_uuid() {
+        // Cursor 3.33 sends a UUID string where the vendored schema declares
+        // `uint32 id`, so the strict decoder rejects the whole tool result.
+        let uuid = b"865744c7-09f4-4482-a4bf-319f356d4f4a";
+        assert_eq!(uuid.len(), 36);
+        let mut exec = Vec::new();
+        exec.extend_from_slice(&wrap(1, uuid));
+        exec.extend_from_slice(&wrap(15, b"call_abc123"));
+        let mut result = Vec::new();
+        agent::ReadResult::default().encode(&mut result).unwrap();
+        exec.extend_from_slice(&wrap(7, &result));
+        let payload = wrap(2, &exec);
+
+        assert!(
+            agent::AgentClientMessage::decode(payload.as_slice()).is_err(),
+            "the fixture must defeat the strict decoder"
+        );
+
+        let recovered = decode_client_message(&payload, "strict failed")
+            .expect("the tool result must survive an unreadable id");
+        let Some(agent::agent_client_message::Message::ExecClientMessage(exec)) = recovered.message
+        else {
+            panic!("expected an exec client message");
+        };
+        assert_eq!(exec.id, 0, "the numeric id cannot be recovered");
+        assert_eq!(
+            exec.exec_id, "call_abc123",
+            "exec_id is the correlation key that survives the drift"
+        );
+        assert!(
+            matches!(
+                exec.message,
+                Some(agent::exec_client_message::Message::ReadResult(_))
+            ),
+            "the tool result itself must be kept"
+        );
     }
 
     #[test]
