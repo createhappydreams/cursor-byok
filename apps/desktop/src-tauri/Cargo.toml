@@ -1,6 +1,6 @@
 [package]
 name = "cursor-byok-desktop"
-version = "1.0.20-local"
+version = "1.0.21-local"
 edition = "2021"
 publish = false
 

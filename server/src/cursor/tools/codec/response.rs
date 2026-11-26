@@ -47,6 +47,14 @@ async fn resolve_exec_id(
         );
         return Some(id);
     }
+    if let Some(id) = pending.sole_pending_exec().await {
+        tracing::warn!(
+            id,
+            exec_id = %message.exec_id,
+            "tool response had no correlation id; matched the only pending exec"
+        );
+        return Some(id);
+    }
     (message.id != 0).then_some(message.id)
 }
 

@@ -239,7 +239,47 @@ fn short(error: &prost::DecodeError) -> String {
 /// stop matching the vendored schema. Each field is probed alone, so a map entry that
 /// no longer parses only costs us that one map.
 fn salvage_state(raw: &[u8]) -> (Option<agent::ConversationStateStructure>, SalvageReport) {
-    salvage::<agent::ConversationStateStructure>(raw, "state")
+    // Fast path: the payload matches the vendored schema.
+    if let Ok(state) = agent::ConversationStateStructure::decode(raw) {
+        let mut report = SalvageReport::default();
+        report.kept = walk(raw).fields.len();
+        return (Some(state), report);
+    }
+
+    // The conversation's history lives in `root_prompt_messages_json` (#1) and
+    // `turns` (#8), both plain byte strings in every schema we have seen. Copying
+    // those fields verbatim keeps the model's context even when the rest of the state
+    // no longer parses, which is the difference between "runs but forgot the
+    // conversation" and "runs with its history".
+    const HISTORY_FIELDS: [u32; 7] = [1, 3, 6, 7, 8, 11, 13];
+    let walked = walk(raw);
+    let mut rebuilt = Vec::with_capacity(raw.len());
+    let mut report = SalvageReport {
+        failed_at: walked.failed_at,
+        ..Default::default()
+    };
+    for field in &walked.fields {
+        if field.wire_type == 2 && HISTORY_FIELDS.contains(&field.number) {
+            rebuilt.extend_from_slice(&raw[field.start..field.end]);
+            report.kept += 1;
+        } else {
+            report
+                .dropped
+                .push(format!("state.#{}/wt{}", field.number, field.wire_type));
+        }
+    }
+    if rebuilt.is_empty() {
+        return (None, report);
+    }
+    match agent::ConversationStateStructure::decode(rebuilt.as_slice()) {
+        Ok(state) => (Some(state), report),
+        Err(error) => {
+            // Even the byte fields are unusable: fall back to dropping only the
+            // fields that fail, and report the error for the dump.
+            report.dropped.push(format!("state: {}", short(&error)));
+            salvage::<agent::ConversationStateStructure>(raw, "state")
+        }
+    }
 }
 
 /// Salvages `AgentRunRequest`, decoding `conversation_state` through [`salvage_state`].
@@ -377,42 +417,43 @@ pub fn decode_client_message(raw: &[u8], strict_error: &str) -> Option<agent::Ag
                     .0
                     .map(agent::agent_client_message::Message::RunRequest)
             }
-            // The result-carrying members share the same shape of drift: `id` is a
-            // varint in the vendored schema and a UUID string in the harness, and one
-            // bad field used to take the whole member with it.
+            // The result-carrying members drifted in the same way: `id` is a varint
+            // in the vendored schema and a UUID string in the harness. Only that one
+            // field is cut out; every other byte of the message (a tool result can be
+            // tens of kilobytes) is reused as is.
             (2, 2) => {
                 kind = "exec_client_message";
-                salvage_member::<agent::ExecClientMessage>(payload, "exec")
+                recover_member::<agent::ExecClientMessage>(payload, &[1], "exec")
                     .map(agent::agent_client_message::Message::ExecClientMessage)
             }
             (5, 2) => {
                 kind = "exec_client_control_message";
-                salvage_member::<agent::ExecClientControlMessage>(payload, "control")
+                recover_control(payload)
                     .map(agent::agent_client_message::Message::ExecClientControlMessage)
             }
             (6, 2) => {
                 kind = "interaction_response";
-                salvage_member::<agent::InteractionResponse>(payload, "interaction")
+                recover_member::<agent::InteractionResponse>(payload, &[1], "interaction")
                     .map(agent::agent_client_message::Message::InteractionResponse)
             }
             (3, 2) => {
                 kind = "kv_client_message";
-                salvage_member::<agent::KvClientMessage>(payload, "kv")
+                recover_member::<agent::KvClientMessage>(payload, &[], "kv")
                     .map(agent::agent_client_message::Message::KvClientMessage)
             }
             (4, 2) => {
                 kind = "conversation_action";
-                salvage_member::<agent::ConversationAction>(payload, "action")
+                recover_member::<agent::ConversationAction>(payload, &[], "action")
                     .map(agent::agent_client_message::Message::ConversationAction)
             }
             (7, 2) => {
                 kind = "client_heartbeat";
-                salvage_member::<agent::ClientHeartbeat>(payload, "heartbeat")
+                recover_member::<agent::ClientHeartbeat>(payload, &[1], "heartbeat")
                     .map(agent::agent_client_message::Message::ClientHeartbeat)
             }
             (8, 2) => {
                 kind = "prewarm_request";
-                salvage_member::<agent::PrewarmRequest>(payload, "prewarm")
+                recover_member::<agent::PrewarmRequest>(payload, &[], "prewarm")
                     .map(agent::agent_client_message::Message::PrewarmRequest)
             }
             _ => {
@@ -444,6 +485,82 @@ where
     M: Message + Default,
 {
     salvage::<M>(raw, level).0
+}
+
+/// Copies every field of `raw` except the ones named in `skip`.
+///
+/// This is the workhorse for messages whose only drift is a field *type* change: the
+/// bytes of every other field are reused verbatim, so a 27 KB tool result is not
+/// re-encoded, not re-validated and not lost. Returns the rebuilt buffer and how many
+/// fields were removed.
+fn strip_fields(raw: &[u8], skip: &[u32]) -> (Vec<u8>, usize) {
+    let walked = walk(raw);
+    let mut out = Vec::with_capacity(raw.len());
+    let mut removed = 0usize;
+    for field in &walked.fields {
+        if skip.contains(&field.number) {
+            removed += 1;
+            continue;
+        }
+        out.extend_from_slice(&raw[field.start..field.end]);
+    }
+    (out, removed)
+}
+
+/// Same as [`strip_fields`], but scrubs the named numbers *inside* `outer` instead.
+fn strip_nested_fields(raw: &[u8], outer: u32, skip: &[u32]) -> (Vec<u8>, usize) {
+    let walked = walk(raw);
+    let mut out = Vec::with_capacity(raw.len());
+    let mut removed = 0usize;
+    for field in &walked.fields {
+        if field.number != outer || field.wire_type != 2 {
+            out.extend_from_slice(&raw[field.start..field.end]);
+            continue;
+        }
+        let (inner, inner_removed) = strip_fields(field.payload(raw), skip);
+        removed += inner_removed;
+        push_varint(&mut out, u64::from((outer << 3) | 2));
+        push_varint(&mut out, inner.len() as u64);
+        out.extend_from_slice(&inner);
+    }
+    (out, removed)
+}
+
+/// Decodes a client-message member, tolerating a changed wire type in `skip` fields.
+///
+/// Order matters: an intact payload is decoded as-is; otherwise the drifted fields are
+/// cut out and the remainder is decoded verbatim; only if that fails does the slow
+/// field-by-field probe run.
+fn recover_member<M>(payload: &[u8], skip: &[u32], level: &str) -> Option<M>
+where
+    M: Message + Default,
+{
+    if let Ok(value) = M::decode(payload) {
+        return Some(value);
+    }
+    if !skip.is_empty() {
+        let (stripped, removed) = strip_fields(payload, skip);
+        if removed > 0 {
+            if let Ok(value) = M::decode(stripped.as_slice()) {
+                return Some(value);
+            }
+        }
+    }
+    salvage_member::<M>(payload, level)
+}
+
+/// `ExecClientControlMessage` keeps its id one level down, inside `stream_close`.
+fn recover_control(payload: &[u8]) -> Option<agent::ExecClientControlMessage> {
+    if let Ok(value) = agent::ExecClientControlMessage::decode(payload) {
+        return Some(value);
+    }
+    let (stripped, removed) = strip_nested_fields(payload, 1, &[1]);
+    if removed > 0 {
+        if let Ok(value) = agent::ExecClientControlMessage::decode(stripped.as_slice()) {
+            return Some(value);
+        }
+    }
+    salvage_member::<agent::ExecClientControlMessage>(payload, "control")
 }
 
 /// Writes one text file per salvaged payload so the next drift is diagnosable
@@ -492,6 +609,17 @@ fn write_dump(raw: &[u8], report: &SalvageReport, message: &agent::AgentClientMe
     out.push_str(&format!("dropped={}\n", report.dropped.join(" | ")));
     out.push_str(&format!("kept_fields={}\n", report.kept));
     if let Some(agent::agent_client_message::Message::RunRequest(request)) = &message.message {
+        // Outline of the surviving state so "history was never sent" and "history was
+        // dropped" are distinguishable without another round trip.
+        if let Some(state) = &request.conversation_state {
+            let encoded = encode_message(state);
+            let outline: Vec<String> = walk(&encoded)
+                .fields
+                .iter()
+                .map(|field| format!("#{}/wt{}/len{}", field.number, field.wire_type, field.len))
+                .collect();
+            out.push_str(&format!("state_wire={}\n", outline.join(" ")));
+        }
         out.push_str(&format!(
             "conversation_id={}\nstate_turns={}\nstate_root_messages={}\n",
             request.conversation_id.clone().unwrap_or_default(),
@@ -593,6 +721,80 @@ mod tests {
         let mut request = wrap(1, &state);
         request.extend_from_slice(&wrap(5, b"conv-1"));
         wrap(1, &request)
+    }
+
+    #[test]
+    fn keeps_history_when_the_rest_of_the_state_is_unreadable() {
+        // A state whose scalar/message fields have drifted still carries `turns` and
+        // root messages as byte strings; losing them means the model continues the
+        // conversation blind.
+        let mut state = Vec::new();
+        state.extend_from_slice(&wrap(1, &[7u8; 32]));
+        state.extend_from_slice(&wrap(1, &[8u8; 32]));
+        // tag 8 = turns, two 32-byte blob ids.
+        state.extend_from_slice(&wrap(8, &[9u8; 32]));
+        state.extend_from_slice(&wrap(8, &[10u8; 32]));
+        // tag 32 (goal_state) as a varint: unreadable for the vendored schema.
+        push_varint(&mut state, u64::from((32u32 << 3) | 0));
+        push_varint(&mut state, 1);
+
+        let (salvaged, report) = salvage_state(&state);
+        let salvaged = salvaged.expect("history fields must survive");
+        assert_eq!(salvaged.root_prompt_messages_json.len(), 2);
+        assert_eq!(salvaged.turns.len(), 2);
+        assert!(
+            report.dropped.iter().any(|entry| entry.contains("#32")),
+            "the drifted field must be reported: {:?}",
+            report.dropped
+        );
+    }
+
+    #[test]
+    fn keeps_a_large_exec_result_when_only_its_id_drifted() {
+        // 27 KB class payload: the tool result must survive byte for byte, only the
+        // numeric id is lost. This is the shape that used to come back with
+        // `kept_fields=0` because every field was probed and dropped.
+        let content = "x".repeat(27 * 1024);
+        let exec = agent::ExecClientMessage {
+            id: 0,
+            exec_id: "call_abc123".into(),
+            hook_additional_contexts: vec![agent::HookAdditionalContext {
+                hook_event_name: "PreToolUse".into(),
+                content: content.clone(),
+            }],
+            message: Some(agent::exec_client_message::Message::ShellResult(
+                Default::default(),
+            )),
+            ..Default::default()
+        };
+        // Re-encode with a UUID where the schema wants the varint id.
+        let mut body = wrap(1, b"865744c7-09f4-4482-a4bf-319f356d4f4a");
+        let mut rest = Vec::new();
+        exec.encode(&mut rest).unwrap();
+        // `rest` starts with field 1 again (id=0 is skipped by prost, so this is the
+        // remaining fields); append them after the UUID.
+        body.extend_from_slice(&rest);
+        let payload = wrap(2, &body);
+
+        assert!(agent::AgentClientMessage::decode(payload.as_slice()).is_err());
+
+        let recovered = decode_client_message(&payload, "strict failed")
+            .expect("the tool result must survive");
+        let Some(agent::agent_client_message::Message::ExecClientMessage(exec)) = recovered.message
+        else {
+            panic!("expected an exec client message");
+        };
+        assert_eq!(exec.exec_id, "call_abc123");
+        assert_eq!(exec.hook_additional_contexts.len(), 1);
+        assert_eq!(
+            exec.hook_additional_contexts[0].content.len(),
+            content.len(),
+            "the 27 KB payload must be preserved"
+        );
+        assert!(matches!(
+            exec.message,
+            Some(agent::exec_client_message::Message::ShellResult(_))
+        ));
     }
 
     #[test]

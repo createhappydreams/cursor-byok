@@ -234,6 +234,20 @@ impl CursorToolRuntime {
             .map(|(id, _)| *id)
     }
 
+    /// The only in-flight exec, when exactly one exists.
+    ///
+    /// Last resort for a response that carries neither a usable numeric id nor an
+    /// `exec_id`. It is only safe with a single pending call: with two in flight the
+    /// result could belong to either, and attaching it to the wrong one is worse than
+    /// dropping it.
+    pub async fn sole_pending_exec(&self) -> Option<u32> {
+        let execs = self.execs.lock().await;
+        if execs.len() == 1 {
+            return execs.keys().next().copied();
+        }
+        None
+    }
+
     /// Resolves an interaction id, falling back to the only pending interaction.
     ///
     /// `InteractionResponse` has no string correlation field, so when its numeric id
